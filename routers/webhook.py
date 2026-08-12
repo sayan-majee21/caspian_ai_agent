@@ -27,6 +27,8 @@ from services.gemini_scanner import (
     evaluate_repository,
 )
 from services.github_service import scan_github_repository
+from services.notification_service import send_followup_notification
+
 
 logger = logging.getLogger("talentcaspian.webhook")
 
@@ -139,6 +141,13 @@ async def process_push_webhook_bg(payload: dict[str, Any], delivery_id: str) -> 
                     logger.info(
                         f"Recruiter suggestion #{sugg['id']} for project {project['id']} marked as resolved."
                     )
+                    await send_followup_notification(
+                        recruiter_id=sugg["recruiter_id"],
+                        project_id=project["id"],
+                        suggestion_text=sugg["suggestion_text"],
+                        pool=conn,
+                    )
+
         except Exception as exc:
             logger.error(f"Error processing major push evaluation for project {project['id']}: {exc}")
 
