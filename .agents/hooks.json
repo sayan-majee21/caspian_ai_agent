@@ -1,0 +1,21 @@
+{
+  "prevent-db-deletion": {
+    "enabled": true,
+    "PreInvocation": null,
+    "PostInvocation": null,
+    "Stop": null,
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .agents/prevent_db_deletion.py",
+            "timeout": 0
+          }
+        ]
+      }
+    ],
+    "PostToolUse": null
+  }
+}
