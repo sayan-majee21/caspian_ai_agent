@@ -46,11 +46,14 @@ def dispatch_message(
     """
     client_instance = client or get_caspian_client()
 
-    channel = recruiter.get("preferred_channel", "email") or "email"
-    if channel == "telegram":
-        recipient = recruiter.get("telegram_handle") or recruiter.get("email") or ""
+    preferred = recruiter.get("preferred_channel", "email") or "email"
+    if preferred == "telegram" and recruiter.get("telegram_handle"):
+        channel = "telegram"
+        recipient = recruiter.get("telegram_handle")
     else:
+        channel = "email"
         recipient = recruiter.get("email") or ""
+
 
     logger.info(
         f"Dispatching Caspian outreach message to recruiter id={recruiter.get('id')} "

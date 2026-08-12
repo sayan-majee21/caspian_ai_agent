@@ -4,6 +4,7 @@ Coordinates matching, deduplication checking (7-day cooldown), message generatio
 Caspian dispatching, and logging for standard outreach and follow-up flows.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -59,33 +60,39 @@ async def process_notifications(
 
         for rec in recruiters:
             rec_id = rec["id"]
-            # Deduplication check (7-day cooldown for standard notifications)
-            recent = await db.has_recent_notification(
-                db_conn, recruiter_id=rec_id, project_id=project_id, within_days=7
-            )
-            if recent:
-                logger.info(
-                    f"Skipping notification for recruiter_id={rec_id}, project_id={project_id} "
-                    f"due to recent notification within 7-day cooldown."
+            try:
+                # Deduplication check (7-day cooldown for standard notifications)
+                recent = await db.has_recent_notification(
+                    db_conn, recruiter_id=rec_id, project_id=project_id, within_days=7
                 )
-                skipped_count += 1
-                continue
+                if recent:
+                    logger.info(
+                        f"Skipping notification for recruiter_id={rec_id}, project_id={project_id} "
+                        f"due to recent notification within 7-day cooldown."
+                    )
+                    skipped_count += 1
+                    continue
 
-            message = await generate_outreach_message(rec, project)
-            dispatch_res = dispatch_message(rec, message, client=client)
+                message = await generate_outreach_message(rec, project)
+                dispatch_res = await asyncio.to_thread(dispatch_message, rec, message, client=client)
 
-            channel = rec.get("preferred_channel", "email") or "email"
-            await db.create_notification_log(
-                db_conn,
-                recruiter_id=rec_id,
-                project_id=project_id,
-                channel=channel,
-                is_followup=False,
-            )
-            processed_count += 1
-            logger.info(
-                f"Successfully processed notification for recruiter_id={rec_id}, project_id={project_id}"
-            )
+                channel = rec.get("preferred_channel", "email") or "email"
+                await db.create_notification_log(
+                    db_conn,
+                    recruiter_id=rec_id,
+                    project_id=project_id,
+                    channel=channel,
+                    is_followup=False,
+                )
+                processed_count += 1
+                logger.info(
+                    f"Successfully processed notification for recruiter_id={rec_id}, project_id={project_id}"
+                )
+            except Exception as rec_exc:
+                logger.error(
+                    f"Failed processing notification for recruiter_id={rec_id}, project_id={project_id}: {rec_exc}",
+                    exc_info=True,
+                )
 
         return {
             "status": "completed",
@@ -96,7 +103,6 @@ async def process_notifications(
     except Exception as exc:
         logger.error(f"Error executing process_notifications background task: {exc}")
         return {"status": "error", "message": str(exc)}
-
 
 
 async def send_followup_notification(
@@ -136,7 +142,8 @@ async def send_followup_notification(
         return {"status": "error", "message": f"Project {project_id} not found"}
 
     message = generate_followup_message(recruiter, project, suggestion_text)
-    dispatch_res = dispatch_message(recruiter, message, client=client)
+    dispatch_res = await asyncio.to_thread(dispatch_message, recruiter, message, client=client)
+
 
     channel = recruiter.get("preferred_channel", "email") or "email"
     await db.create_notification_log(

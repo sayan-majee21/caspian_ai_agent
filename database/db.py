@@ -542,11 +542,16 @@ async def get_recruiter_matches(
         OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
         OR r.preference_filters->'tech_stack' = '[]'::jsonb
         OR jsonb_array_length(r.preference_filters->'tech_stack') = 0
-        OR EXISTS (
-          SELECT 1 
-          FROM jsonb_array_elements_text(p.tags) tag
-          WHERE tag = ANY (
-            SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+        OR (
+          p.tags IS NOT NULL
+          AND jsonb_typeof(p.tags) = 'array'
+          AND jsonb_array_length(p.tags) > 0
+          AND EXISTS (
+            SELECT 1 
+            FROM jsonb_array_elements_text(p.tags) tag
+            WHERE tag = ANY (
+              SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+            )
           )
         )
       )
@@ -584,15 +589,21 @@ async def find_matches(
         OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
         OR r.preference_filters->'tech_stack' = '[]'::jsonb
         OR jsonb_array_length(r.preference_filters->'tech_stack') = 0
-        OR EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.tags) tag
-          WHERE tag = ANY (
-            SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+        OR (
+          p.tags IS NOT NULL
+          AND jsonb_typeof(p.tags) = 'array'
+          AND jsonb_array_length(p.tags) > 0
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(p.tags) tag
+            WHERE tag = ANY (
+              SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+            )
           )
         )
       );
     """
+
     rows = await conn_or_pool.fetch(sql, project_id)
     items = []
     for r in rows:

@@ -17,6 +17,7 @@ from services.notification_service import (
     send_followup_notification,
 )
 from services.outreach_service import (
+    _get_matching_tags,
     generate_followup_message,
     generate_outreach_message,
 )
@@ -25,7 +26,7 @@ client = TestClient(app)
 
 
 # ---------------------------------------------------------------------------
-# Test 1: Matching Engine
+# Test 1: Matching Engine & Boundary Edge Cases
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_matching_engine():
@@ -77,8 +78,58 @@ async def test_matching_engine():
     assert matched_projects[0]["tags"] == ["python", "fastapi"]
 
 
+@pytest.mark.asyncio
+async def test_matching_engine_empty_tech_stack_and_filters():
+    """Verify matching engine handles empty tech_stack, None, and empty JSONB preference filters."""
+    mock_conn = AsyncMock()
+    mock_conn.fetch.return_value = [
+        {
+            "id": 2,
+            "name": "General Recruiter",
+            "email": "general@recruiting.com",
+            "preferred_channel": "email",
+            "telegram_handle": None,
+            "preference_filters": "{}",
+            "created_at": None,
+        }
+    ]
+
+    matched = await find_matches(mock_conn, project_id=99)
+    assert len(matched) == 1
+    assert matched[0]["name"] == "General Recruiter"
+    assert matched[0]["preference_filters"] == {}
+
+
+@pytest.mark.asyncio
+async def test_matching_engine_min_score_boundary_conditions():
+    """Verify min_score boundary conditions (>= min_score threshold)."""
+    mock_conn = AsyncMock()
+
+    # Case: Project score equal to min_score (75.0 == 75.0) -> match
+    mock_conn.fetch.side_effect = [
+        [
+            {
+                "id": 3,
+                "name": "Boundary Recruiter",
+                "email": "boundary@test.com",
+                "preferred_channel": "email",
+                "telegram_handle": None,
+                "preference_filters": '{"min_score": 75.0}',
+                "created_at": None,
+            }
+        ],
+        [],  # Sub-threshold score (74.9 < 75.0) -> no match returned by DB
+    ]
+
+    matched_exact = await find_matches(mock_conn, project_id=100)
+    assert len(matched_exact) == 1
+
+    matched_below = await find_matches(mock_conn, project_id=101)
+    assert len(matched_below) == 0
+
+
 # ---------------------------------------------------------------------------
-# Test 2: Outreach Generation
+# Test 2: Outreach Generation & Gemini Fallback Edge Cases
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_outreach_generation():
@@ -98,7 +149,7 @@ async def test_outreach_generation():
         "tags": ["python", "fastapi", "postgresql"],
     }
 
-    # Test fallback message generation
+    # Test fallback message generation (no API key set)
     msg = await generate_outreach_message(recruiter, project)
     assert "Jane Recruiter" in msg
     assert "Alex Dev" in msg
@@ -116,8 +167,56 @@ async def test_outreach_generation():
     assert "add unit tests for auth module" in followup_msg
 
 
+@pytest.mark.asyncio
+async def test_outreach_generation_gemini_exception_fallback():
+    """Verify outreach service safely catches Gemini API exceptions and returns fallback message."""
+    recruiter = {
+        "id": 1,
+        "name": "Dave Recruiter",
+        "email": "dave@tech.com",
+        "preference_filters": {"tech_stack": ["python"]},
+    }
+    project = {
+        "id": 5,
+        "student_name": "Eve Student",
+        "repo_url": "https://github.com/eve/ml-pipeline",
+        "summary": "ML pipeline for telemetry",
+        "tags": ["python", "pytorch"],
+    }
+
+    # Mock google.generativeai raising an Exception
+    with patch("google.generativeai.GenerativeModel") as mock_model_cls:
+        mock_model = MagicMock()
+        mock_model.generate_content.side_effect = RuntimeError("Gemini API Rate Limit Exceeded")
+        mock_model_cls.return_value = mock_model
+
+        msg = await generate_outreach_message(recruiter, project, api_key="fake_key")
+
+        assert "Hi Dave Recruiter" in msg
+        assert "Eve Student" in msg
+        assert "ml-pipeline" in msg
+
+
+def test_matching_tags_helper():
+    """Verify _get_matching_tags helper functions with various input formats and case insensitivity."""
+    recruiter_json_pref = {
+        "preference_filters": '{"tech_stack": ["PYTHON", "Docker"]}'
+    }
+    project_str_tags = {
+        "tags": '["python", "fastapi", "docker"]'
+    }
+
+    matched = _get_matching_tags(recruiter_json_pref, project_str_tags)
+    assert "python" in matched
+    assert "docker" in matched
+
+    # Case: Empty recruiter tech stack -> returns all project tags
+    empty_rec = {"preference_filters": {}}
+    assert _get_matching_tags(empty_rec, project_str_tags) == ["python", "fastapi", "docker"]
+
+
 # ---------------------------------------------------------------------------
-# Test 3: Caspian Dispatch
+# Test 3: Caspian Outreach Dispatching & Exception Handling
 # ---------------------------------------------------------------------------
 def test_caspian_dispatch():
     """Verify dispatch_message routes to correct recipient and channel via CommClient."""
@@ -153,8 +252,34 @@ def test_caspian_dispatch():
     )
 
 
+def test_caspian_dispatch_telegram_fallback_and_exception():
+    """Verify telegram falls back to email if handle missing, and handles client exceptions cleanly."""
+    mock_client = MagicMock()
+
+    # Telegram channel with missing handle -> fallback recipient to email
+    recruiter_no_handle = {
+        "id": 3,
+        "name": "NoHandle",
+        "email": "nohandle@hr.com",
+        "preferred_channel": "telegram",
+        "telegram_handle": None,
+    }
+    mock_client.send_message.return_value = {"status": "sent"}
+    res = dispatch_message(recruiter_no_handle, "Test msg", client=mock_client)
+    mock_client.send_message.assert_called_with(
+        channel="email", recipient="nohandle@hr.com", content="Test msg"
+    )
+
+
+    # Client exception handling
+    mock_client.send_message.side_effect = RuntimeError("SDK Network Error")
+    res_err = dispatch_message(recruiter_no_handle, "Test msg", client=mock_client)
+    assert res_err["status"] == "failed"
+    assert "SDK Network Error" in res_err["error"]
+
+
 # ---------------------------------------------------------------------------
-# Test 4: Deduplication Check
+# Test 4: Deduplication Check & Cooldown Logic
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_deduplication():
@@ -281,7 +406,15 @@ def test_admin_notify_endpoint():
     )
     assert resp_invalid.status_code == 401
 
-    # 3. Authorized call with valid header
+    # 3. Invalid payload (missing project_id)
+    resp_bad_body = client.post(
+        "/api/admin/notify",
+        json={},
+        headers={"X-Admin-API-Key": "dev_admin_key_12345"},
+    )
+    assert resp_bad_body.status_code == 422
+
+    # 4. Authorized call with valid header
     with patch("routers.admin.process_notifications") as mock_proc:
         resp_valid = client.post(
             "/api/admin/notify",
@@ -293,4 +426,3 @@ def test_admin_notify_endpoint():
         assert data["status"] == "queued"
         assert data["project_id"] == 1
         assert data["recruiter_id"] == 2
-
