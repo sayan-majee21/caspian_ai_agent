@@ -10,6 +10,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import close_db_pool, init_db_pool, is_pool_ready
+from routers.admin import router as admin_router
+from routers.public import router as public_router
+from routers.recruiters import router as recruiter_router
 
 
 @asynccontextmanager
@@ -28,6 +31,11 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Include routers
+app.include_router(public_router)
+app.include_router(recruiter_router)
+app.include_router(admin_router)
 
 # Configure CORS (supports JSON array or comma-separated origins)
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
