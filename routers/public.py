@@ -5,21 +5,53 @@ import logging
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
+import database.db as db_module
 from database.db import (
     add_project_rating,
     create_project,
     create_student,
     get_db_connection,
     get_projects_feed,
+    update_project_ai_scores,
     update_project_score,
 )
+from services.gemini_scanner import evaluate_repository
+from services.github_service import scan_github_repository
 
 logger = logging.getLogger("talentcaspian.public")
 
 router = APIRouter(prefix="/api", tags=["Public & Students"])
+
+
+async def scan_and_evaluate_project_bg(project_id: int, repo_url: str) -> None:
+    """Background task to scan and evaluate a student's portfolio project upon registration.
+
+    Args:
+        project_id (int): Project ID.
+        repo_url (str): GitHub repository URL.
+    """
+    if not db_module.is_pool_ready() or db_module.DB_POOL is None:
+        return
+    try:
+        repo_context = await scan_github_repository(repo_url)
+        eval_res = await evaluate_repository(repo_context)
+        async with db_module.DB_POOL.acquire() as conn:
+            await update_project_ai_scores(
+                conn,
+                project_id=project_id,
+                ai_difficulty=eval_res["ai_difficulty"],
+                ai_authenticity=eval_res["ai_authenticity"],
+                ai_creativity=eval_res["ai_creativity"],
+                ai_score=eval_res["ai_score"],
+                tags=eval_res["tags"],
+                summary=eval_res["summary"],
+            )
+            logger.info(f"Initial scan and evaluation completed for project #{project_id}")
+    except Exception as exc:
+        logger.error(f"Error during initial scanning of project #{project_id}: {exc}")
 
 
 class StudentRegisterRequest(BaseModel):
@@ -48,12 +80,14 @@ class ProjectRatingRequest(BaseModel):
 )
 async def register_student(
     payload: StudentRegisterRequest,
+    background_tasks: BackgroundTasks,
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> dict[str, Any]:
     """Register a new student and optional repository project within a transaction.
 
     Args:
         payload (StudentRegisterRequest): Registration payload.
+        background_tasks (BackgroundTasks): FastAPI BackgroundTasks.
         conn (asyncpg.Connection): Active database connection.
 
     Returns:
@@ -88,6 +122,9 @@ async def register_student(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=detail,
         )
+
+    if project:
+        background_tasks.add_task(scan_and_evaluate_project_bg, project["id"], project["repo_url"])
 
     return {
         "status": "success",
