@@ -1,9 +1,10 @@
 """Database connection pool management module using asyncpg."""
 
-import os
 import logging
-import asyncpg
+import os
 from typing import AsyncGenerator
+
+import asyncpg
 
 logger = logging.getLogger("talentcaspian.database")
 
@@ -13,12 +14,22 @@ DB_POOL: asyncpg.Pool | None = None
 async def init_db_pool() -> None:
     """Initialize the global PostgreSQL connection pool using asyncpg."""
     global DB_POOL
+    if DB_POOL is not None:
+        return
+
     database_url = os.getenv(
         "DATABASE_URL",
-        "postgresql://postgres:password@localhost:5432/talentcaspian"
+        "postgresql://postgres:password@localhost:5432/talentcaspian",
     )
+    min_size = int(os.getenv("DB_MIN_SIZE", "5"))
+    max_size = int(os.getenv("DB_MAX_SIZE", "20"))
+
     try:
-        DB_POOL = await asyncpg.create_pool(dsn=database_url, min_size=5, max_size=20)
+        DB_POOL = await asyncpg.create_pool(
+            dsn=database_url,
+            min_size=min_size,
+            max_size=max_size,
+        )
         logger.info("PostgreSQL database pool initialized successfully.")
     except Exception as exc:
         logger.warning(f"Could not connect to PostgreSQL database pool: {exc}")

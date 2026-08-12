@@ -4,16 +4,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import json
 import os
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database.db import init_db_pool, close_db_pool, is_pool_ready
+from database.db import close_db_pool, init_db_pool, is_pool_ready
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Lifecycle manager for FastAPI application startup and shutdown."""
     # Startup
     await init_db_pool()
@@ -29,20 +29,34 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS (supports CORS_ORIGINS array or FRONTEND_URL string)
+# Configure CORS (supports JSON array or comma-separated origins)
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-origins_str = os.getenv("CORS_ORIGINS", f'["{frontend_url}"]')
-try:
-    origins = json.loads(origins_str)
-    if frontend_url not in origins:
-        origins.append(frontend_url)
-except json.JSONDecodeError:
+origins_env = os.getenv("CORS_ORIGINS")
+
+origins: list[str] = []
+if origins_env:
+    try:
+        parsed = json.loads(origins_env)
+        if isinstance(parsed, list):
+            origins = [str(o).strip() for o in parsed]
+        elif isinstance(parsed, str):
+            origins = [o.strip() for o in parsed.split(",") if o.strip()]
+    except json.JSONDecodeError:
+        origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+
+if frontend_url and frontend_url not in origins and "*" not in origins:
+    origins.append(frontend_url)
+
+if not origins:
     origins = [frontend_url, "http://localhost:5173"]
+
+# Credentials cannot be allowed when origins contains wildcard "*"
+allow_credentials = "*" not in origins
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -60,5 +74,5 @@ async def health_check() -> dict[str, Any]:
     return {
         "status": "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "database": db_status
+        "database": db_status,
     }
