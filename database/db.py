@@ -83,6 +83,11 @@ CREATE TABLE IF NOT EXISTS notification_logs (
     sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS processed_deliveries (
+    delivery_id VARCHAR(255) PRIMARY KEY,
+    processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_projects_student_id ON projects(student_id);
 CREATE INDEX IF NOT EXISTS idx_projects_tags ON projects USING GIN (tags);
 CREATE INDEX IF NOT EXISTS idx_project_ratings_project_id ON project_ratings(project_id);
@@ -656,3 +661,110 @@ async def has_recent_notification(
     """
     val = await conn_or_pool.fetchval(sql, recruiter_id, project_id, str(within_days))
     return bool(val)
+
+
+async def is_delivery_processed(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, delivery_id: str
+) -> bool:
+    """Check if a webhook delivery ID has already been processed.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        delivery_id (str): Unique GitHub delivery UUID.
+
+    Returns:
+        bool: True if already processed, False otherwise.
+    """
+    sql = "SELECT EXISTS (SELECT 1 FROM processed_deliveries WHERE delivery_id = $1);"
+    val = await conn_or_pool.fetchval(sql, delivery_id)
+    return bool(val)
+
+
+async def record_delivery_processed(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, delivery_id: str
+) -> None:
+    """Record a webhook delivery ID as processed.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        delivery_id (str): Unique GitHub delivery UUID.
+    """
+    sql = """
+    INSERT INTO processed_deliveries (delivery_id)
+    VALUES ($1)
+    ON CONFLICT (delivery_id) DO NOTHING;
+    """
+    await conn_or_pool.execute(sql, delivery_id)
+
+
+async def get_project_by_repo_url(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, repo_url: str
+) -> dict[str, Any] | None:
+    """Retrieve a project record by exact repository URL or normalized URL match.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        repo_url (str): GitHub repository URL or SSH/clone URL.
+
+    Returns:
+        dict[str, Any] | None: Project record if found, None otherwise.
+    """
+    clean_url = repo_url.rstrip("/").removesuffix(".git")
+    sql = """
+    SELECT * FROM projects
+    WHERE LOWER(repo_url) = LOWER($1)
+       OR LOWER(repo_url) = LOWER($2)
+       OR LOWER(repo_url) LIKE LOWER($3);
+    """
+    row = await conn_or_pool.fetchrow(sql, repo_url, clean_url, f"%{clean_url}%")
+    if not row:
+        return None
+    res = dict(row)
+    if isinstance(res.get("tags"), str):
+        res["tags"] = json.loads(res["tags"])
+    return res
+
+
+async def get_unresolved_suggestions(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, project_id: int
+) -> list[dict[str, Any]]:
+    """Retrieve all unresolved suggestions for a specific project.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        project_id (int): Project ID.
+
+    Returns:
+        list[dict[str, Any]]: List of unresolved suggestion records.
+    """
+    sql = """
+    SELECT id, project_id, recruiter_id, suggestion_text, resolved, created_at
+    FROM suggestions
+    WHERE project_id = $1 AND resolved = FALSE
+    ORDER BY created_at ASC;
+    """
+    rows = await conn_or_pool.fetch(sql, project_id)
+    return [dict(r) for r in rows]
+
+
+async def mark_suggestion_resolved(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, suggestion_id: int
+) -> dict[str, Any] | None:
+    """Mark a recruiter suggestion as resolved.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        suggestion_id (int): Suggestion ID.
+
+    Returns:
+        dict[str, Any] | None: Updated suggestion record.
+    """
+    sql = """
+    UPDATE suggestions
+    SET resolved = TRUE
+    WHERE id = $1
+    RETURNING id, project_id, recruiter_id, suggestion_text, resolved, created_at;
+    """
+    row = await conn_or_pool.fetchrow(sql, suggestion_id)
+    return dict(row) if row else None
+

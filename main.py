@@ -14,6 +14,7 @@ from database.db import close_db_pool, init_db_pool, is_pool_ready
 from routers.admin import router as admin_router
 from routers.public import router as public_router
 from routers.recruiters import router as recruiter_router
+from routers.webhook import router as webhook_router
 
 
 @asynccontextmanager
@@ -37,6 +38,7 @@ app = FastAPI(
 app.include_router(public_router)
 app.include_router(recruiter_router)
 app.include_router(admin_router)
+app.include_router(webhook_router)
 
 # Configure CORS (supports JSON array or comma-separated origins)
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
