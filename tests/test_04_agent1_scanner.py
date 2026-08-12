@@ -387,3 +387,159 @@ async def test_webhook_major_push_updates_database_and_recomputes_final_score(
         call for call in mock_conn.execute.call_args_list if "UPDATE projects" in str(call)
     ]
     assert len(update_calls) > 0
+
+
+# ---------------------------------------------------------------------------
+# 5. Advanced Edge Cases & Agency Security / Reliability Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_webhook_non_push_event_ignored(setup_mock_db_pool_and_connection):
+    """Verify non-push GitHub events (ping, issues, pull_request) are ignored."""
+    secret = "skip_signature_verification"
+    payload = {"zen": "Non-blocking is better than blocking."}
+    body = json.dumps(payload).encode("utf-8")
+
+    with patch.dict(os.environ, {"GITHUB_WEBHOOK_SECRET": secret}):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            res = await client.post(
+                "/api/webhook/github",
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-GitHub-Delivery": "delivery-ping-5555",
+                    "X-GitHub-Event": "ping",
+                },
+            )
+            assert res.status_code == 202
+            assert res.json()["status"] == "ignored"
+            assert "unhandled event type" in res.json()["reason"]
+
+
+@pytest.mark.asyncio
+async def test_webhook_unregistered_project_ignored(setup_mock_db_pool_and_connection):
+    """Verify push event for repository not registered in DB is logged and ignored cleanly."""
+    mock_conn = setup_mock_db_pool_and_connection
+    mock_conn.fetchrow.return_value = None  # get_project_by_repo_url returns None
+
+    from routers.webhook import process_push_webhook_bg
+
+    webhook_payload = {
+        "repository": {"html_url": "https://github.com/unknown/unregistered-repo"},
+        "commits": [{"message": "feat: new feature", "modified": ["main.py"]}],
+    }
+
+    # Should complete without error or DB updates
+    await process_push_webhook_bg(webhook_payload, "delivery-unregistered-6666")
+
+
+@pytest.mark.asyncio
+async def test_recruiter_suggestion_auto_resolution(setup_mock_db_pool_and_connection):
+    """Verify major push resolving a recruiter suggestion updates suggestion resolved status."""
+    mock_conn = setup_mock_db_pool_and_connection
+
+    project_row = {
+        "id": 42,
+        "student_id": 2,
+        "repo_url": "https://github.com/student/app",
+        "summary": "App summary",
+        "tags": '["python"]',
+        "ai_difficulty": 60.0,
+        "ai_authenticity": 60.0,
+        "ai_creativity": 60.0,
+        "ai_score": 60.0,
+        "final_score": 6.0,
+    }
+    mock_conn.fetchrow.side_effect = [project_row, project_row, project_row]
+    mock_conn.fetch.side_effect = [
+        [{"rating": 7}],  # project ratings
+        [
+            {
+                "id": 101,
+                "project_id": 42,
+                "recruiter_id": 5,
+                "suggestion_text": "add unit tests for API endpoints",
+                "resolved": False,
+            }
+        ],  # unresolved suggestions
+    ]
+
+    mock_scan = {
+        "owner": "student",
+        "repo": "app",
+        "repo_url": "https://github.com/student/app",
+        "stars": 1,
+        "forks": 0,
+        "language": "Python",
+        "description": "App",
+        "default_branch": "main",
+        "readme": "# App",
+        "tree_structure": ["main.py", "tests/test_api.py"],
+        "source_files": {"tests/test_api.py": "def test_app(): pass"},
+    }
+
+    mock_eval = {
+        "ai_difficulty": 80.0,
+        "ai_authenticity": 85.0,
+        "ai_creativity": 75.0,
+        "ai_score": 80.0,
+        "tags": ["python", "testing"],
+        "summary": "App with unit test suite.",
+    }
+
+    from routers.webhook import process_push_webhook_bg
+
+    webhook_payload = {
+        "repository": {"html_url": "https://github.com/student/app"},
+        "commits": [{"message": "test: add unit tests for API endpoints", "modified": ["tests/test_api.py"]}],
+    }
+
+    with patch("routers.webhook.scan_github_repository", AsyncMock(return_value=mock_scan)), patch(
+        "routers.webhook.evaluate_repository", AsyncMock(return_value=mock_eval)
+    ), patch("routers.webhook.check_suggestion_resolution", AsyncMock(return_value=True)):
+        await process_push_webhook_bg(webhook_payload, "delivery-sugg-7777")
+
+    # Assert UPDATE suggestions SET resolved = TRUE was executed
+    sugg_calls = [
+        call for call in mock_conn.fetchrow.call_args_list if "UPDATE suggestions" in str(call)
+    ]
+    assert len(sugg_calls) > 0
+
+
+@pytest.mark.asyncio
+async def test_github_service_error_handling():
+    """Verify GitHub service error handling for 404 Not Found and 403 Rate Limit."""
+    async with respx.mock:
+        respx.get("https://api.github.com/repos/fake/missing").mock(
+            return_value=Response(404, json={"message": "Not Found"})
+        )
+        with pytest.raises(ValueError, match="GitHub repository not found"):
+            await fetch_repo_metadata("fake", "missing")
+
+        respx.get("https://api.github.com/repos/fake/ratelimited").mock(
+            return_value=Response(403, json={"message": "API rate limit exceeded"})
+        )
+        with pytest.raises(RuntimeError, match="GitHub API rate limit exceeded"):
+            await fetch_repo_metadata("fake", "ratelimited")
+
+
+@pytest.mark.asyncio
+async def test_gemini_scanner_exception_resilience():
+    """Verify evaluate_repository handles LLM exceptions gracefully with safe defaults."""
+    repo_context = {"repo": "err-repo", "owner": "test", "language": "Python"}
+
+    with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key"}):
+        with patch("google.generativeai.GenerativeModel") as mock_model_cls:
+            mock_model = MagicMock()
+            mock_model.generate_content.side_effect = Exception("API quota exceeded")
+            mock_model_cls.return_value = mock_model
+
+            res = await evaluate_repository(repo_context)
+            assert res["ai_difficulty"] == 65.0
+            assert res["ai_authenticity"] == 75.0
+            assert res["ai_creativity"] == 70.0
+            assert res["ai_score"] == calculate_weighted_ai_score(65.0, 75.0, 70.0)
+            assert "software-engineering" in res["tags"]
+
