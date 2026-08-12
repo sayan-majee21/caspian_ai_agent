@@ -14,3 +14,9 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# External Agency & Karpathy skill directories
+agency-agents/
+agency-agents-app/
+andrej-karpathy-skills/
+
