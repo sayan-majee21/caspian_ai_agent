@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS project_ratings (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_rating_per_ip_per_day
-    ON project_ratings (project_id, rater_ip_hash, (created_at::date))
+    ON project_ratings (project_id, rater_ip_hash, ((created_at AT TIME ZONE 'UTC')::date))
     WHERE rater_ip_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS suggestions (
@@ -134,12 +134,14 @@ async def init_db_pool() -> None:
 
 
 async def close_db_pool() -> None:
-    """Close the global PostgreSQL connection pool on shutdown."""
+    """Close the global PostgreSQL connection pool on shutdown safely."""
     global DB_POOL
     if DB_POOL:
-        await DB_POOL.close()
-        DB_POOL = None
-        logger.info("PostgreSQL database pool closed.")
+        try:
+            await DB_POOL.close()
+            logger.info("PostgreSQL database pool closed.")
+        finally:
+            DB_POOL = None
 
 
 async def get_db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
@@ -172,12 +174,12 @@ def is_pool_ready() -> bool:
 
 
 async def create_student(
-    conn_or_pool: Any, student_data: dict[str, Any]
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, student_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Insert a new student record into the database.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         student_data (dict[str, Any]): Dictionary containing name, email, github_username.
 
     Returns:
@@ -198,12 +200,12 @@ async def create_student(
 
 
 async def get_student_by_email_or_username(
-    conn_or_pool: Any, email: str, github_username: str
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, email: str, github_username: str
 ) -> dict[str, Any] | None:
     """Find student by email or GitHub username.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         email (str): Student email.
         github_username (str): GitHub username.
 
@@ -220,12 +222,12 @@ async def get_student_by_email_or_username(
 
 
 async def create_project(
-    conn_or_pool: Any, project_data: dict[str, Any]
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, project_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Insert a new project record into the database.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         project_data (dict[str, Any]): Project data (student_id, repo_url, optional summary, tags).
 
     Returns:
@@ -255,7 +257,7 @@ async def create_project(
 
 
 async def get_projects_feed(
-    conn_or_pool: Any,
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool,
     page: int = 1,
     limit: int = 10,
     search_query: str | None = None,
@@ -264,7 +266,7 @@ async def get_projects_feed(
     """Retrieve paginated portfolio projects feed ordered by final_score descending.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         page (int): Page number (1-indexed).
         limit (int): Items per page.
         search_query (str | None): Optional search term.
@@ -333,12 +335,12 @@ async def get_projects_feed(
 
 
 async def add_project_rating(
-    conn_or_pool: Any, rating_data: dict[str, Any]
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, rating_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Submit a rating for a project with IP-based uniqueness constraint.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         rating_data (dict[str, Any]): Rating metadata.
 
     Returns:
@@ -360,11 +362,13 @@ async def add_project_rating(
     return dict(row) if row else {}
 
 
-async def update_project_score(conn_or_pool: Any, project_id: int) -> float:
+async def update_project_score(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, project_id: int
+) -> float:
     """Recalculate and update the final_score of a project using Bayesian average.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         project_id (int): ID of the project to update.
 
     Returns:
@@ -389,7 +393,7 @@ async def update_project_score(conn_or_pool: Any, project_id: int) -> float:
 
 
 async def update_project_ai_scores(
-    conn_or_pool: Any,
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool,
     project_id: int,
     ai_difficulty: float,
     ai_authenticity: float,
@@ -401,7 +405,7 @@ async def update_project_ai_scores(
     """Update AI evaluation scores, tags, and summary for a project, then recalculate final_score.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         project_id (int): Project ID.
         ai_difficulty (float): Difficulty score (0-100).
         ai_authenticity (float): Authenticity score (0-100).
@@ -448,12 +452,12 @@ async def update_project_ai_scores(
 
 
 async def create_recruiter(
-    conn_or_pool: Any, recruiter_data: dict[str, Any]
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, recruiter_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Insert a new recruiter record into the database.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         recruiter_data (dict[str, Any]): Recruiter record attributes.
 
     Returns:
@@ -482,12 +486,12 @@ async def create_recruiter(
 
 
 async def get_recruiter_by_id(
-    conn_or_pool: Any, recruiter_id: int
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, recruiter_id: int
 ) -> dict[str, Any] | None:
     """Retrieve recruiter by ID.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         recruiter_id (int): Recruiter ID.
 
     Returns:
@@ -508,12 +512,12 @@ async def get_recruiter_by_id(
 
 
 async def get_recruiter_matches(
-    conn_or_pool: Any, recruiter_id: int
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, recruiter_id: int
 ) -> list[dict[str, Any]]:
     """Get candidate projects matching a recruiter's preference_filters.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         recruiter_id (int): Recruiter ID.
 
     Returns:
@@ -530,6 +534,7 @@ async def get_recruiter_matches(
       AND COALESCE(p.final_score, 0) >= COALESCE((r.preference_filters->>'min_score')::float, 0)
       AND (
         r.preference_filters->'tech_stack' IS NULL 
+        OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
         OR r.preference_filters->'tech_stack' = '[]'::jsonb
         OR jsonb_array_length(r.preference_filters->'tech_stack') = 0
         OR EXISTS (
@@ -552,11 +557,13 @@ async def get_recruiter_matches(
     return items
 
 
-async def find_matches(conn_or_pool: Any, project_id: int) -> list[dict[str, Any]]:
+async def find_matches(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, project_id: int
+) -> list[dict[str, Any]]:
     """Get candidate recruiters matching a specific project's score and tech stack tags.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         project_id (int): Project ID.
 
     Returns:
@@ -569,6 +576,7 @@ async def find_matches(conn_or_pool: Any, project_id: int) -> list[dict[str, Any
       AND COALESCE(p.final_score, 0) >= COALESCE((r.preference_filters->>'min_score')::float, 0)
       AND (
         r.preference_filters->'tech_stack' IS NULL
+        OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
         OR r.preference_filters->'tech_stack' = '[]'::jsonb
         OR jsonb_array_length(r.preference_filters->'tech_stack') = 0
         OR EXISTS (
@@ -595,12 +603,12 @@ get_project_matches = find_matches
 
 
 async def add_suggestion(
-    conn_or_pool: Any, suggestion_data: dict[str, Any]
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, suggestion_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Insert a recruiter suggestion feedback for a project.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         suggestion_data (dict[str, Any]): Contains project_id, recruiter_id, suggestion_text.
 
     Returns:
@@ -621,12 +629,15 @@ async def add_suggestion(
 
 
 async def has_recent_notification(
-    conn_or_pool: Any, recruiter_id: int, project_id: int, within_days: int = 7
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool,
+    recruiter_id: int,
+    project_id: int,
+    within_days: int = 7,
 ) -> bool:
     """Check if a notification was sent to a recruiter for a project within a given number of days.
 
     Args:
-        conn_or_pool (Any): Connection or Pool object.
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
         recruiter_id (int): Recruiter ID.
         project_id (int): Project ID.
         within_days (int): Time window in days. Defaults to 7.

@@ -22,7 +22,17 @@ from main import app
 def setup_mock_db_pool_and_connection():
     """Fixture to mock DB_POOL and override get_db_connection dependency for tests."""
     mock_conn = MagicMock()
-    db_module.DB_POOL = MagicMock()
+    mock_pool = MagicMock()
+
+    class AsyncContextManagerMock:
+        async def __aenter__(self):
+            return mock_conn
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    mock_pool.acquire.return_value = AsyncContextManagerMock()
+    db_module.DB_POOL = mock_pool
 
     async def override_get_db_connection():
         yield mock_conn
@@ -65,19 +75,16 @@ def test_calculate_final_score_scale_assertion():
     Guards against scale-mismatch regression where ratings (1-10) were not scaled to 0-100.
     """
     score = calculate_final_score(100.0, [10] * 20)
-    # With n=20 of 10s: raw avg = (25 + 200)/25 = 9.0 -> scaled = 90.0
-    # final_score = 70 + 27 = 97.0
     assert score > 95.0, f"Expected final_score > 95.0, got {score}"
     assert score == 97.0
 
 
-def test_calculate_final_score_none_ai_score():
-    """Verify calculate_final_score handles None ai_score gracefully."""
-    score = calculate_final_score(None, [5] * 5)
-    # ai_score = 0.0 -> 0.0 * 0.7 = 0.0
-    # ratings [5]*5 -> raw avg = (25 + 25)/10 = 5.0 -> scaled = 50.0
-    # final_score = 0 + 15.0 = 15.0
-    assert score == 15.0
+def test_calculate_final_score_clamping_and_nan_guards():
+    """Verify calculate_final_score clamps out-of-bound AI scores and guards against NaN/Inf."""
+    assert calculate_final_score(150.0, [5] * 5) == 85.0
+    assert calculate_final_score(-50.0, [5] * 5) == 15.0
+    assert calculate_final_score(float("nan"), [5] * 5) == 15.0
+    assert calculate_final_score(float("inf"), [5] * 5) == 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +102,7 @@ def test_db_schema_ddl_contains_required_tables_and_indexes():
     assert "CREATE TABLE IF NOT EXISTS suggestions" in sql
     assert "CREATE TABLE IF NOT EXISTS notification_logs" in sql
     assert "uq_rating_per_ip_per_day" in sql
+    assert "(created_at AT TIME ZONE 'UTC')::date" in sql
     assert "idx_projects_tags" in sql
     assert "idx_recruiters_preference_filters" in sql
 
@@ -156,7 +164,7 @@ async def test_register_student_success():
 async def test_register_student_duplicate_conflict():
     """Test POST /api/register handles duplicate student error with 400 Bad Request."""
     with patch("routers.public.create_student", new_callable=AsyncMock) as mock_create_student:
-        mock_create_student.side_effect = asyncpg.UniqueViolationError()
+        mock_create_student.side_effect = asyncpg.UniqueViolationError("duplicate key value violates unique constraint")
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -265,7 +273,7 @@ async def test_rate_project_success():
 async def test_rate_project_duplicate_ip_conflict():
     """Test POST /api/rate returns 409 Conflict when unique IP constraint triggers."""
     with patch("routers.public.add_project_rating", new_callable=AsyncMock) as mock_add_rating:
-        mock_add_rating.side_effect = asyncpg.UniqueViolationError()
+        mock_add_rating.side_effect = asyncpg.UniqueViolationError("duplicate key")
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -321,6 +329,21 @@ async def test_recruiter_register_success():
         assert response.status_code == 201
         data = response.json()
         assert data["email"] == "bob@techcorp.com"
+
+
+@pytest.mark.asyncio
+async def test_recruiter_register_invalid_channel_validation():
+    """Test POST /api/recruiter/register returns 422 when channel is not email or telegram."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        payload = {
+            "name": "Recruiter Bob",
+            "email": "bob@techcorp.com",
+            "preferred_channel": "sms",
+        }
+        response = await ac.post("/api/recruiter/register", json=payload)
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -423,6 +446,22 @@ async def test_create_suggestion_success():
         data = response.json()
         assert data["status"] == "success"
         assert data["suggestion"]["suggestion_text"] == "Great work! Consider adding unit tests."
+
+
+@pytest.mark.asyncio
+async def test_create_suggestion_blank_text_validation():
+    """Test POST /api/suggest returns 400 Bad Request when suggestion text is only whitespace."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        payload = {
+            "project_id": 10,
+            "recruiter_id": 1,
+            "suggestion_text": "   ",
+        }
+        response = await ac.post("/api/suggest", json=payload)
+
+    assert response.status_code == 400
+    assert "cannot be empty" in response.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 """Admin and background process API stub endpoints for TalentCaspian."""
 
+import hmac
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin & Background Stubs"])
 class AdminScanRequest(BaseModel):
     """Payload schema for triggering AI scanning process."""
 
-    project_id: Optional[int] = Field(
+    project_id: int | None = Field(
         None, description="Optional project ID to scan. If None, scans all pending projects."
     )
 
@@ -24,22 +25,22 @@ class AdminNotifyRequest(BaseModel):
     """Payload schema for triggering recruiter notification process."""
 
     project_id: int = Field(..., description="Project ID to send notifications for.")
-    recruiter_id: Optional[int] = Field(
+    recruiter_id: int | None = Field(
         None, description="Optional single recruiter ID to notify. If None, scans all matching recruiters."
     )
 
 
-def verify_admin_key(x_admin_api_key: Optional[str] = Header(None, alias="X-Admin-API-Key")) -> None:
-    """Dependency to verify the admin API key.
+def verify_admin_key(x_admin_api_key: str | None = Header(None, alias="X-Admin-API-Key")) -> None:
+    """Dependency to verify the admin API key using constant-time comparison.
 
     Args:
-        x_admin_api_key (Optional[str]): Provided X-Admin-API-Key header value.
+        x_admin_api_key (str | None): Provided X-Admin-API-Key header value.
 
     Raises:
         HTTPException: If key is missing or invalid.
     """
     expected_key = os.getenv("ADMIN_API_KEY", "dev_admin_key_12345")
-    if expected_key and x_admin_api_key != expected_key:
+    if not x_admin_api_key or not hmac.compare_digest(x_admin_api_key, expected_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Admin-API-Key header",
@@ -54,13 +55,13 @@ def verify_admin_key(x_admin_api_key: Optional[str] = Header(None, alias="X-Admi
 )
 async def trigger_admin_scan(
     payload: AdminScanRequest,
-    x_admin_api_key: Optional[str] = Header(None, alias="X-Admin-API-Key"),
+    x_admin_api_key: str | None = Header(None, alias="X-Admin-API-Key"),
 ) -> dict[str, Any]:
     """Trigger AI scanning process stub.
 
     Args:
         payload (AdminScanRequest): Scan parameters.
-        x_admin_api_key (Optional[str]): Admin API Key header.
+        x_admin_api_key (str | None): Admin API Key header.
 
     Returns:
         dict[str, Any]: Queued status and metadata.
@@ -83,13 +84,13 @@ async def trigger_admin_scan(
 )
 async def trigger_admin_notify(
     payload: AdminNotifyRequest,
-    x_admin_api_key: Optional[str] = Header(None, alias="X-Admin-API-Key"),
+    x_admin_api_key: str | None = Header(None, alias="X-Admin-API-Key"),
 ) -> dict[str, Any]:
     """Trigger recruiter notification stub.
 
     Args:
         payload (AdminNotifyRequest): Notification parameters.
-        x_admin_api_key (Optional[str]): Admin API Key header.
+        x_admin_api_key (str | None): Admin API Key header.
 
     Returns:
         dict[str, Any]: Queued status and metadata.

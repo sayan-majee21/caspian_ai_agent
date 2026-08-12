@@ -9,6 +9,7 @@ from typing import Any, AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import database.db as db_module
 from database.db import close_db_pool, init_db_pool, is_pool_ready
 from routers.admin import router as admin_router
 from routers.public import router as public_router
@@ -73,12 +74,20 @@ app.add_middleware(
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict[str, Any]:
-    """Health check endpoint to report API status and DB connectivity.
+    """Health check endpoint to report API status and active DB connectivity.
 
     Returns:
         dict[str, Any]: Application health status.
     """
-    db_status = "connected" if is_pool_ready() else "disconnected"
+    db_status = "disconnected"
+    if is_pool_ready() and db_module.DB_POOL is not None:
+        try:
+            async with db_module.DB_POOL.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            db_status = "connected"
+        except Exception:
+            db_status = "degraded"
+
     return {
         "status": "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),

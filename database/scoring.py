@@ -1,5 +1,7 @@
 """Project scoring and Bayesian average calculation module."""
 
+import math
+
 
 def calculate_bayesian_average(
     ratings: list[int], C: float = 5.0, m: float = 5.0
@@ -14,10 +16,14 @@ def calculate_bayesian_average(
     Returns:
         float: Calculated Bayesian average on a 1-10 scale.
     """
-    if not ratings:
+    valid_ratings = [
+        r for r in ratings
+        if isinstance(r, (int, float)) and not math.isnan(r) and not math.isinf(r) and 1 <= r <= 10
+    ]
+    if not valid_ratings:
         return m
-    n = len(ratings)
-    sum_ratings = sum(ratings)
+    n = len(valid_ratings)
+    sum_ratings = sum(valid_ratings)
     return (C * m + sum_ratings) / (C + n)
 
 
@@ -36,7 +42,11 @@ def calculate_final_score(
     Returns:
         float: Final score normalized to a 0-100 scale, rounded to 2 decimal places.
     """
-    ai_val = ai_score if ai_score is not None else 0.0
+    if ai_score is None or math.isnan(ai_score) or math.isinf(ai_score):
+        ai_val = 0.0
+    else:
+        ai_val = max(0.0, min(100.0, float(ai_score)))
+
     bayesian_avg_raw = calculate_bayesian_average(ratings)
     bayesian_avg_scaled = bayesian_avg_raw * 10.0  # Normalize 1-10 scale to 0-100
     final_score = (ai_val * 0.7) + (bayesian_avg_scaled * 0.3)

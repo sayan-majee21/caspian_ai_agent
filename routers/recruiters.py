@@ -1,7 +1,7 @@
 """Recruiter API endpoints for TalentCaspian."""
 
 import logging
-from typing import Any, Optional
+from typing import Any, Literal
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,9 +25,13 @@ class RecruiterRegisterRequest(BaseModel):
 
     name: str = Field(..., min_length=1, description="Recruiter name")
     email: EmailStr = Field(..., description="Recruiter contact email")
-    preferred_channel: str = Field("email", description="Preferred contact channel ('email' or 'telegram')")
-    telegram_handle: Optional[str] = Field(None, description="Telegram handle (required if preferred_channel is 'telegram')")
-    preference_filters: Optional[dict[str, Any]] = Field(
+    preferred_channel: Literal["email", "telegram"] = Field(
+        "email", description="Preferred contact channel ('email' or 'telegram')"
+    )
+    telegram_handle: str | None = Field(
+        None, description="Telegram handle (required if preferred_channel is 'telegram')"
+    )
+    preference_filters: dict[str, Any] | None = Field(
         default_factory=dict, description="JSON object containing matching filters e.g. min_score and tech_stack"
     )
 
@@ -59,7 +63,9 @@ async def register_recruiter(
     Returns:
         dict[str, Any]: Created recruiter record.
     """
-    if payload.preferred_channel.lower() == "telegram" and not payload.telegram_handle:
+    if payload.preferred_channel == "telegram" and not (
+        payload.telegram_handle and payload.telegram_handle.strip()
+    ):
         raise HTTPException(
             status_code=422,
             detail="telegram_handle is required when preferred_channel is 'telegram'",
@@ -68,8 +74,8 @@ async def register_recruiter(
     recruiter_data = {
         "name": payload.name,
         "email": payload.email,
-        "preferred_channel": payload.preferred_channel.lower(),
-        "telegram_handle": payload.telegram_handle,
+        "preferred_channel": payload.preferred_channel,
+        "telegram_handle": payload.telegram_handle.strip() if payload.telegram_handle else None,
         "preference_filters": payload.preference_filters or {},
     }
 
@@ -136,10 +142,17 @@ async def create_suggestion(
     Returns:
         dict[str, Any]: Status confirmation and created suggestion record.
     """
+    clean_text = payload.suggestion_text.strip()
+    if not clean_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="suggestion_text cannot be empty or blank",
+        )
+
     suggestion_data = {
         "project_id": payload.project_id,
         "recruiter_id": payload.recruiter_id,
-        "suggestion_text": payload.suggestion_text.strip(),
+        "suggestion_text": clean_text,
     }
 
     try:

@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -28,7 +28,7 @@ class StudentRegisterRequest(BaseModel):
     name: str = Field(..., min_length=1, description="Student full name")
     email: EmailStr = Field(..., description="Student email address")
     github_username: str = Field(..., min_length=1, description="GitHub username")
-    repo_url: Optional[str] = Field(None, description="Optional initial GitHub project repository URL")
+    repo_url: str | None = Field(None, description="Optional initial GitHub project repository URL")
 
 
 class ProjectRatingRequest(BaseModel):
@@ -36,7 +36,7 @@ class ProjectRatingRequest(BaseModel):
 
     project_id: int = Field(..., description="Target project ID")
     rater_type: str = Field("public", description="Type of rater ('public' or 'recruiter')")
-    rater_id: Optional[int] = Field(None, description="Optional ID of rater if registered")
+    rater_id: int | None = Field(None, description="Optional ID of rater if registered")
     rating: int = Field(..., ge=1, le=10, description="Rating value from 1 to 10")
 
 
@@ -50,7 +50,7 @@ async def register_student(
     payload: StudentRegisterRequest,
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> dict[str, Any]:
-    """Register a new student and optional repository project.
+    """Register a new student and optional repository project within a transaction.
 
     Args:
         payload (StudentRegisterRequest): Registration payload.
@@ -66,29 +66,28 @@ async def register_student(
     }
 
     try:
-        student = await create_student(conn, student_data)
-    except asyncpg.UniqueViolationError:
+        async with conn.transaction():
+            student = await create_student(conn, student_data)
+            project = None
+            if payload.repo_url and payload.repo_url.strip():
+                project_data = {
+                    "student_id": student["id"],
+                    "repo_url": payload.repo_url.strip(),
+                    "summary": None,
+                    "tags": [],
+                    "final_score": None,
+                }
+                project = await create_project(conn, project_data)
+    except asyncpg.UniqueViolationError as err:
+        err_msg = str(err.args[0]) if err.args else ""
+        if "repo_url" in err_msg or "projects_" in err_msg:
+            detail = "Project repository URL already registered"
+        else:
+            detail = "Student with this email or GitHub username already exists"
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student with this email or GitHub username already exists",
+            detail=detail,
         )
-
-    project = None
-    if payload.repo_url and payload.repo_url.strip():
-        project_data = {
-            "student_id": student["id"],
-            "repo_url": payload.repo_url.strip(),
-            "summary": None,
-            "tags": [],
-            "final_score": None,
-        }
-        try:
-            project = await create_project(conn, project_data)
-        except asyncpg.UniqueViolationError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Project repository URL already registered",
-            )
 
     return {
         "status": "success",
@@ -105,8 +104,8 @@ async def register_student(
 async def get_dashboard(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(10, ge=1, le=100, description="Page item limit"),
-    search_query: Optional[str] = Query(None, description="Search term for projects or students"),
-    min_score: Optional[float] = Query(None, ge=0.0, le=100.0, description="Minimum final_score filter"),
+    search_query: str | None = Query(None, description="Search term for projects or students"),
+    min_score: float | None = Query(None, ge=0.0, le=100.0, description="Minimum final_score filter"),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> dict[str, Any]:
     """Get paginated portfolio feed.
@@ -114,8 +113,8 @@ async def get_dashboard(
     Args:
         page (int): Page number.
         limit (int): Items per page.
-        search_query (Optional[str]): Optional query filter.
-        min_score (Optional[float]): Optional minimum score filter.
+        search_query (str | None): Optional query filter.
+        min_score (float | None): Optional minimum score filter.
         conn (asyncpg.Connection): Active database connection.
 
     Returns:
@@ -141,7 +140,7 @@ async def rate_project(
     request: Request,
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> dict[str, Any]:
-    """Submit a rating for a project.
+    """Submit a rating for a project inside a transaction.
 
     Args:
         payload (ProjectRatingRequest): Rating submission payload.
@@ -151,7 +150,6 @@ async def rate_project(
     Returns:
         dict[str, Any]: Submitted rating details and updated project final score.
     """
-    # Obtain client IP
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         client_ip = forwarded.split(",")[0].strip()
@@ -171,7 +169,9 @@ async def rate_project(
     }
 
     try:
-        rating_record = await add_project_rating(conn, rating_data)
+        async with conn.transaction():
+            rating_record = await add_project_rating(conn, rating_data)
+            new_score = await update_project_score(conn, payload.project_id)
     except asyncpg.UniqueViolationError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -182,9 +182,6 @@ async def rate_project(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
         )
-
-    # Recalculate score
-    new_score = await update_project_score(conn, payload.project_id)
 
     return {
         "status": "success",
