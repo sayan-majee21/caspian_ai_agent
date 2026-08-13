@@ -838,3 +838,60 @@ async def create_notification_log(
     return dict(row) if row else {}
 
 
+async def get_recruiter_by_contact(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, contact_info: str
+) -> dict[str, Any] | None:
+    """Find recruiter by email address or Telegram handle.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        contact_info (str): Recruiter email address or Telegram handle.
+
+    Returns:
+        dict[str, Any] | None: Recruiter record if found, else None.
+    """
+    if not contact_info:
+        return None
+
+    clean_info = str(contact_info).strip()
+    clean_no_at = clean_info.lstrip("@")
+    clean_with_at = f"@{clean_no_at}"
+
+    sql = """
+    SELECT id, name, email, preferred_channel, telegram_handle, preference_filters, created_at
+    FROM recruiters
+    WHERE LOWER(email) = LOWER($1)
+       OR LOWER(telegram_handle) = LOWER($1)
+       OR LOWER(telegram_handle) = LOWER($2)
+       OR LOWER(telegram_handle) = LOWER($3);
+    """
+    row = await conn_or_pool.fetchrow(sql, clean_info, clean_no_at, clean_with_at)
+    if row:
+        res = dict(row)
+        if isinstance(res.get("preference_filters"), str):
+            res["preference_filters"] = json.loads(res["preference_filters"])
+        return res
+    return None
+
+
+async def get_latest_notified_project_for_recruiter(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, recruiter_id: int
+) -> int | None:
+    """Retrieve the project ID of the most recent notification log for a recruiter.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        recruiter_id (int): Recruiter ID.
+
+    Returns:
+        int | None: Latest notified project ID if found, else None.
+    """
+    sql = """
+    SELECT project_id
+    FROM notification_logs
+    WHERE recruiter_id = $1
+    ORDER BY sent_at DESC, id DESC
+    LIMIT 1;
+    """
+    val = await conn_or_pool.fetchval(sql, recruiter_id)
+    return int(val) if val is not None else None
