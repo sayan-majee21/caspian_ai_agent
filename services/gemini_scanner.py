@@ -118,7 +118,16 @@ async def evaluate_repository(
 
             response = await asyncio.to_thread(model.generate_content, prompt_content)
             res_text = response.text.strip()
+            if res_text.startswith("```"):
+                lines = res_text.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                res_text = "\n".join(lines).strip()
+
             data = json.loads(res_text)
+
 
             diff = float(data.get("difficulty", 70.0))
             auth = float(data.get("authenticity", 75.0))
@@ -257,8 +266,17 @@ async def check_suggestion_resolution(
             Return JSON: {{"resolved": true}} or {{"resolved": false}}.
             """
             response = await asyncio.to_thread(model.generate_content, prompt)
-            data = json.loads(response.text.strip())
+            res_text = response.text.strip()
+            if res_text.startswith("```"):
+                lines = res_text.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                res_text = "\n".join(lines).strip()
+            data = json.loads(res_text)
             return bool(data.get("resolved", False))
+
         except Exception as exc:
             logger.warning(f"Suggestion resolution check failed: {exc}")
             return any(w in joined_commits for w in sugg_words) if sugg_words else False

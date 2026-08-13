@@ -4,6 +4,7 @@ Parses incoming recruiter replies to classify intent (suggestion, rating, inquir
 and extract actionable details (suggestion text, numerical rating 1-10).
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -11,10 +12,16 @@ import re
 from typing import Any
 import google.generativeai as genai
 
+
 logger = logging.getLogger("talentcaspian.reply_parser")
 
 
+# Global semaphore for rate limiting Gemini API calls
+_gemini_semaphore = asyncio.Semaphore(5)
+
+
 def parse_reply_with_regex(text: str) -> dict[str, Any]:
+
     """Fallback natural language parsing using regex and keyword matching.
 
     Args:
@@ -125,10 +132,11 @@ Output a valid JSON object matching this schema:
 Output ONLY the JSON object, with no markdown formatting or extra commentary."""
 
     try:
-        genai.configure(api_key=key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = await model.generate_content_async(prompt)
-        raw_output = response.text.strip()
+        async with _gemini_semaphore:
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = await model.generate_content_async(prompt)
+            raw_output = response.text.strip()
 
         # Clean code block backticks if present
         if raw_output.startswith("```"):
