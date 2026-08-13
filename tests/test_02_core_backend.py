@@ -208,7 +208,8 @@ async def test_cors_disallowed_origin():
 async def test_lifespan_startup_and_shutdown():
     """Verify lifespan context manager triggers DB pool init on startup and close on shutdown."""
     mock_pool = AsyncMock()
-    with patch("database.db.asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool:
+    with patch("database.db.asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool, \
+         patch("database.db.init_db_schema", new_callable=AsyncMock):
         mock_create_pool.return_value = mock_pool
 
         async with lifespan(app):

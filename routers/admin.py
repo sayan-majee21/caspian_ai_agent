@@ -5,10 +5,13 @@ import logging
 import os
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
+from services.notification_service import process_notifications
+
 logger = logging.getLogger("talentcaspian.admin")
+
 
 router = APIRouter(prefix="/api/admin", tags=["Admin & Background Stubs"])
 
@@ -79,17 +82,19 @@ async def trigger_admin_scan(
 @router.post(
     "/notify",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger recruiter notification scan stub",
-    description="Triggers the background Caspian multi-channel recruiter notification process (Agent 2 stub).",
+    summary="Trigger recruiter notification scan",
+    description="Triggers the background Caspian multi-channel recruiter notification process (Agent 2).",
 )
 async def trigger_admin_notify(
     payload: AdminNotifyRequest,
+    background_tasks: BackgroundTasks,
     x_admin_api_key: str | None = Header(None, alias="X-Admin-API-Key"),
 ) -> dict[str, Any]:
-    """Trigger recruiter notification stub.
+    """Trigger recruiter notification background process.
 
     Args:
         payload (AdminNotifyRequest): Notification parameters.
+        background_tasks (BackgroundTasks): FastAPI background task manager.
         x_admin_api_key (str | None): Admin API Key header.
 
     Returns:
@@ -100,9 +105,15 @@ async def trigger_admin_notify(
         f"Admin notify triggered for project_id={payload.project_id}, recruiter_id={payload.recruiter_id}"
     )
 
+    background_tasks.add_task(
+        process_notifications, project_id=payload.project_id, recruiter_id=payload.recruiter_id
+    )
+
     return {
         "status": "queued",
         "message": "Notification process queued",
         "project_id": payload.project_id,
         "recruiter_id": payload.recruiter_id,
     }
+
+

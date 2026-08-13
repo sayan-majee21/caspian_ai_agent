@@ -542,11 +542,16 @@ async def get_recruiter_matches(
         OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
         OR r.preference_filters->'tech_stack' = '[]'::jsonb
         OR jsonb_array_length(r.preference_filters->'tech_stack') = 0
-        OR EXISTS (
-          SELECT 1 
-          FROM jsonb_array_elements_text(p.tags) tag
-          WHERE tag = ANY (
-            SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+        OR (
+          p.tags IS NOT NULL
+          AND jsonb_typeof(p.tags) = 'array'
+          AND jsonb_array_length(p.tags) > 0
+          AND EXISTS (
+            SELECT 1 
+            FROM jsonb_array_elements_text(p.tags) tag
+            WHERE tag = ANY (
+              SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+            )
           )
         )
       )
@@ -584,15 +589,21 @@ async def find_matches(
         OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
         OR r.preference_filters->'tech_stack' = '[]'::jsonb
         OR jsonb_array_length(r.preference_filters->'tech_stack') = 0
-        OR EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.tags) tag
-          WHERE tag = ANY (
-            SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+        OR (
+          p.tags IS NOT NULL
+          AND jsonb_typeof(p.tags) = 'array'
+          AND jsonb_array_length(p.tags) > 0
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(p.tags) tag
+            WHERE tag = ANY (
+              SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+            )
           )
         )
       );
     """
+
     rows = await conn_or_pool.fetch(sql, project_id)
     items = []
     for r in rows:
@@ -767,4 +778,63 @@ async def mark_suggestion_resolved(
     """
     row = await conn_or_pool.fetchrow(sql, suggestion_id)
     return dict(row) if row else None
+
+
+async def get_project_by_id(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool, project_id: int
+) -> dict[str, Any] | None:
+    """Retrieve a project record with student metadata by project ID.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        project_id (int): Project ID.
+
+    Returns:
+        dict[str, Any] | None: Project record if found, else None.
+    """
+    sql = """
+    SELECT p.id, p.student_id, p.repo_url, p.summary, p.tags, p.ai_difficulty,
+           p.ai_authenticity, p.ai_creativity, p.ai_score, p.final_score,
+           p.last_scanned_at, p.created_at,
+           s.name as student_name, s.github_username, s.email as student_email
+    FROM projects p
+    LEFT JOIN students s ON p.student_id = s.id
+    WHERE p.id = $1;
+    """
+    row = await conn_or_pool.fetchrow(sql, project_id)
+    if row:
+        res = dict(row)
+        if isinstance(res.get("tags"), str):
+            res["tags"] = json.loads(res["tags"])
+        return res
+    return None
+
+
+async def create_notification_log(
+    conn_or_pool: asyncpg.Connection | asyncpg.Pool,
+    recruiter_id: int,
+    project_id: int,
+    channel: str,
+    is_followup: bool = False,
+) -> dict[str, Any]:
+    """Insert a record into notification_logs table.
+
+    Args:
+        conn_or_pool (asyncpg.Connection | asyncpg.Pool): Connection or Pool object.
+        recruiter_id (int): Recruiter ID.
+        project_id (int): Project ID.
+        channel (str): Preferred channel used for notification ('email', 'telegram', etc.).
+        is_followup (bool): Whether this notification is a follow-up outreach. Defaults to False.
+
+    Returns:
+        dict[str, Any]: Created notification log record.
+    """
+    sql = """
+    INSERT INTO notification_logs (recruiter_id, project_id, channel, is_followup)
+    VALUES ($1, $2, $3, $4)
+    RETURNING id, recruiter_id, project_id, channel, is_followup, sent_at;
+    """
+    row = await conn_or_pool.fetchrow(sql, recruiter_id, project_id, channel, is_followup)
+    return dict(row) if row else {}
+
 
