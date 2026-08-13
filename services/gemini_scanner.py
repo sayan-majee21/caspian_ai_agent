@@ -64,7 +64,8 @@ async def evaluate_repository(
         dict[str, Any]: Evaluation dictionary containing ai_difficulty, ai_authenticity,
             ai_creativity, ai_score, tags, and summary.
     """
-    key = api_key or os.getenv("GEMINI_API_KEY")
+    key = api_key if api_key is not None else os.getenv("GEMINI_API_KEY")
+
 
     if not key:
         logger.info("GEMINI_API_KEY not set. Using fallback deterministic evaluation.")
@@ -109,7 +110,7 @@ async def evaluate_repository(
             """
 
             response = await client.aio.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-flash-latest",
                 contents=prompt_content,
                 config=types.GenerateContentConfig(
                     system_instruction=EVALUATION_SYSTEM_PROMPT,
@@ -186,7 +187,8 @@ async def classify_push_update(
         if not any(kw in joined_commits for kw in ["feat", "fix", "add", "refactor", "implement"]):
             return "Minor"
 
-    key = api_key or os.getenv("GEMINI_API_KEY")
+    key = api_key if api_key is not None else os.getenv("GEMINI_API_KEY")
+
     if not key:
         # Default heuristics when API key is missing
         return "Minor" if only_docs else "Major"
@@ -206,7 +208,7 @@ async def classify_push_update(
             Respond with ONLY one word: "Major" or "Minor".
             """
             response = await client.aio.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-flash-latest",
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.0),
             )
@@ -234,7 +236,8 @@ async def check_suggestion_resolution(
     Returns:
         bool: True if the suggestion is resolved by this push, False otherwise.
     """
-    key = api_key or os.getenv("GEMINI_API_KEY")
+    key = api_key if api_key is not None else os.getenv("GEMINI_API_KEY")
+
     joined_commits = " ".join(commit_messages).lower()
     sugg_words = [w.lower() for w in suggestion_text.split() if len(w) > 3]
 
@@ -260,7 +263,7 @@ async def check_suggestion_resolution(
             Return JSON: {{"resolved": true}} or {{"resolved": false}}.
             """
             response = await client.aio.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-flash-latest",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",

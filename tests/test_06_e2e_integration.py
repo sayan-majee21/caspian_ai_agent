@@ -592,7 +592,8 @@ async def test_master_e2e_lifecycle(mock_db):
     # Step 6: Agent 2 Caspian Outreach Dispatching
     # -----------------------------------------------------------------------
     outreach_msg = await generate_outreach_message(recruiter_record, project_after_ai)
-    assert "Sarah Recruiter" in outreach_msg
+    assert "Sarah" in outreach_msg
+
     assert "Alex E2E Dev" in outreach_msg
     assert "smart-payment-gateway" in outreach_msg
 

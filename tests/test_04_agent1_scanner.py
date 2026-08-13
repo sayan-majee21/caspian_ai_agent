@@ -208,7 +208,7 @@ async def test_evaluate_repository_fallback():
 @pytest.mark.asyncio
 async def test_classify_push_update_minor():
     """Test push classification for minor updates (documentation/typos)."""
-    res = await classify_push_update(["fix typo in README"], ["README.md"])
+    res = await classify_push_update(["fix typo in README"], ["README.md"], api_key="")
     assert res == "Minor"
 
 
@@ -216,9 +216,10 @@ async def test_classify_push_update_minor():
 async def test_classify_push_update_major():
     """Test push classification for major functional updates."""
     res = await classify_push_update(
-        ["feat: add postgres connection pool and endpoints"], ["main.py", "database/db.py"]
+        ["feat: add postgres connection pool and endpoints"], ["main.py", "database/db.py"], api_key=""
     )
     assert res == "Major"
+
 
 
 # ---------------------------------------------------------------------------
@@ -498,8 +499,11 @@ async def test_recruiter_suggestion_auto_resolution(setup_mock_db_pool_and_conne
 
     with patch("routers.webhook.scan_github_repository", AsyncMock(return_value=mock_scan)), patch(
         "routers.webhook.evaluate_repository", AsyncMock(return_value=mock_eval)
-    ), patch("routers.webhook.check_suggestion_resolution", AsyncMock(return_value=True)):
+    ), patch("routers.webhook.classify_push_update", AsyncMock(return_value="Major")), patch(
+        "routers.webhook.check_suggestion_resolution", AsyncMock(return_value=True)
+    ):
         await process_push_webhook_bg(webhook_payload, "delivery-sugg-7777")
+
 
     # Assert UPDATE suggestions SET resolved = TRUE was executed
     sugg_calls = [

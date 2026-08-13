@@ -137,7 +137,7 @@ Output ONLY the JSON object, with no markdown formatting or extra commentary."""
         async with _gemini_semaphore:
             client = genai.Client(api_key=key)
             response = await client.aio.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-flash-latest",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",

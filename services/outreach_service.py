@@ -99,7 +99,7 @@ async def generate_outreach_message(
             """
 
             response = await client.aio.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-flash-latest",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=OUTREACH_SYSTEM_PROMPT,

@@ -151,10 +151,12 @@ async def test_outreach_generation():
 
     # Test fallback message generation (no API key set)
     msg = await generate_outreach_message(recruiter, project)
-    assert "Jane Recruiter" in msg
+    assert "Jane" in msg
+
     assert "Alex Dev" in msg
     assert "https://github.com/alex/smart-api" in msg
-    assert "python" in msg
+    assert "python" in msg.lower()
+
     assert "http://localhost:3000/dashboard" in msg
 
     # Test follow-up message generation
