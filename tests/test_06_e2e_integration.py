@@ -27,7 +27,7 @@ import pytest
 # Ensure workspace root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from caspian_sdk import CommClient
+from caspian_sdk import CommClient, Message
 import database.db as db_module
 from database.db import (
     add_project_rating,
@@ -222,6 +222,15 @@ class StatefulMockDB:
             rid = args[0]
             return self.recruiters.get(rid)
 
+        elif "FROM RECRUITERS" in q and "LOWER(EMAIL)" in q:
+            contact = str(args[0]).strip().lower().lstrip("@")
+            for r in self.recruiters.values():
+                r_email = r["email"].lower()
+                r_tg = (r.get("telegram_handle") or "").lower().lstrip("@")
+                if r_email == contact or r_tg == contact:
+                    return r
+            return None
+
 
         elif "FROM PROJECTS" in q and "LOWER(REPO_URL)" in q:
             url = args[0].lower()
@@ -323,7 +332,13 @@ class StatefulMockDB:
 
     async def fetchval(self, query: str, *args):
         q = query.upper()
-        if "SELECT EXISTS" in q and "NOTIFICATION_LOGS" in q:
+        if "SELECT PROJECT_ID" in q and "NOTIFICATION_LOGS" in q:
+            rid = args[0]
+            for l in reversed(self.notification_logs):
+                if l["recruiter_id"] == rid:
+                    return l["project_id"]
+            return None
+        elif "SELECT EXISTS" in q and "NOTIFICATION_LOGS" in q:
             rid, pid = args[0], args[1]
             return any(
                 l["recruiter_id"] == rid and l["project_id"] == pid for l in self.notification_logs
@@ -848,4 +863,131 @@ async def test_e2e_boundary_and_resilience(mock_db):
                 headers={"X-Admin-API-Key": "wrong_api_key"},
             )
             assert bad_admin_key.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# 5. Master Closed-Loop E2E Test: Step 5 Outreach -> Step 6 Reply -> Step 4 Resolution -> Step 5 Follow-Up
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_e2e_closed_loop_recruiter_reply_to_followup(mock_db):
+    """Verify full end-to-end multi-agent feedback loop across all steps:
+    1. Student & Project Registration
+    2. Recruiter Registration & Match Discovery
+    3. Agent 2 initial Caspian Outreach Dispatching & notification_logs recording
+    4. Recruiter sends reply message processed by Step 6 Listener Agent (caspian_agent)
+    5. Step 6 Listener resolves recruiter identity and project context via notification_logs,
+       creates an unresolved suggestion and adds a recruiter rating, updating project final_score.
+    6. Student pushes GitHub commit resolving the suggestion.
+    7. GitHub Webhook triggers Agent 1 Scanner auto-resolution of suggestion.
+    8. Agent 1 auto-resolution triggers Agent 2 follow-up notification dispatch to recruiter.
+    """
+    mock_caspian = MagicMock(spec=CommClient)
+    mock_caspian.send_message.return_value = {"status": "sent", "id": "caspian_closed_loop_001"}
+
+    # Step 1: Create Student & Project
+    student = await create_student(
+        mock_db,
+        {"name": "Carol ClosedLoop", "email": "carol@closedloop.org", "github_username": "carolloop"},
+    )
+    project = await create_project(
+        mock_db,
+        {"student_id": student["id"], "repo_url": "https://github.com/carolloop/ai-agent"},
+    )
+    await update_project_ai_scores(
+        mock_db, project["id"], 85.0, 90.0, 80.0, 85.0, ["python", "ai"], "AI Agent Framework"
+    )
+
+    # Step 2: Create Recruiter
+    recruiter = await create_recruiter(
+        mock_db,
+        {
+            "name": "David Recruiter",
+            "email": "david@techhire.com",
+            "preferred_channel": "email",
+            "preference_filters": {"tech_stack": ["python"], "min_score": 70.0},
+        },
+    )
+
+    # Step 3: Agent 2 Outreach Notification Batch Process
+    batch_res = await process_notifications(
+        project_id=project["id"], pool=mock_db, client=mock_caspian
+    )
+    assert batch_res["processed_count"] == 1
+    assert len(mock_db.notification_logs) == 1
+    log = mock_db.notification_logs[0]
+    assert log["recruiter_id"] == recruiter["id"]
+    assert log["project_id"] == project["id"]
+
+    # Step 4 & 5: Recruiter replies via Caspian Channel (Step 6 Listener Agent)
+    mock_reply_msg = MagicMock(spec=Message)
+    mock_reply_msg.channel = "email"
+    mock_reply_msg.sender = "david@techhire.com"
+    mock_reply_msg.text = "Great AI project! Rating: 9/10. Suggestion: add Dockerfile and docker-compose"
+    mock_reply_msg.reply = MagicMock()
+
+    from caspian_agent import process_inbound_message
+
+    with patch.object(db_module, "DB_POOL", mock_db), patch.object(db_module, "is_pool_ready", return_value=True):
+        listener_res = await process_inbound_message(mock_reply_msg)
+
+    assert listener_res["status"] == "processed"
+    assert listener_res["recruiter_id"] == recruiter["id"]
+    assert listener_res["project_id"] == project["id"]
+    assert listener_res["suggestion_added"] is True
+    assert listener_res["rating_added"] is True
+
+    # Verify suggestion stored with resolved=False
+    unresolved_suggs = await get_unresolved_suggestions(mock_db, project["id"])
+    assert len(unresolved_suggs) == 1
+    assert "Dockerfile" in unresolved_suggs[0]["suggestion_text"]
+    assert unresolved_suggs[0]["resolved"] is False
+
+    # Verify rating recorded and score updated
+    updated_proj = await get_project_by_id(mock_db, project["id"])
+    assert updated_proj["final_score"] is not None
+
+    # Step 6 & 7: Student pushes commit resolving the suggestion (GitHub Webhook -> Agent 1)
+    webhook_payload = {
+        "repository": {"html_url": project["repo_url"]},
+        "commits": [
+            {
+                "message": "feat: add Dockerfile and docker-compose setup",
+                "added": ["Dockerfile", "docker-compose.yml"],
+            }
+        ],
+    }
+
+    mock_scan_data = {
+        "owner": "carolloop",
+        "repo": "ai-agent",
+        "language": "Python",
+        "source_files": {"Dockerfile": "FROM python:3.11", "main.py": "print('ai')"},
+    }
+    mock_gemini_eval = {
+        "ai_difficulty": 85.0,
+        "ai_authenticity": 92.0,
+        "ai_creativity": 85.0,
+        "ai_score": 87.0,
+        "tags": ["python", "ai", "docker"],
+        "summary": "AI Agent with Docker containerization",
+    }
+
+    from routers.webhook import process_push_webhook_bg
+
+    with patch("routers.webhook.scan_github_repository", AsyncMock(return_value=mock_scan_data)), patch(
+        "routers.webhook.evaluate_repository", AsyncMock(return_value=mock_gemini_eval)
+    ), patch(
+        "services.caspian_outreach.get_caspian_client", return_value=mock_caspian
+    ):
+        await process_push_webhook_bg(webhook_payload, "delivery-closed-loop-e2e")
+
+    # Step 8: Verify suggestion marked resolved and Agent 2 follow-up outreach sent
+    unresolved_after = await get_unresolved_suggestions(mock_db, project["id"])
+    assert len(unresolved_after) == 0
+
+    # Verify follow-up log recorded in notification_logs
+    followup_logs = [l for l in mock_db.notification_logs if l.get("is_followup")]
+    assert len(followup_logs) == 1
+    assert followup_logs[0]["recruiter_id"] == recruiter["id"]
+    assert followup_logs[0]["project_id"] == project["id"]
 

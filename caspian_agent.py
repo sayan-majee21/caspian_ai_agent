@@ -39,9 +39,32 @@ client: CommClient = CommClient(
     base_url=os.getenv("CASPIAN_BASE_URL", "https://api.caspian.network"),
 )
 
+# Reference to the main asyncio event loop (where DB pool is initialized)
+MAIN_EVENT_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
 
 def run_sync_coro(coro: Any) -> Any:
     """Execute an async coroutine synchronously safely across thread and loop contexts."""
+    global MAIN_EVENT_LOOP
+
+    if MAIN_EVENT_LOOP is not None and MAIN_EVENT_LOOP.is_running():
+        try:
+            current_loop = None
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            if current_loop is MAIN_EVENT_LOOP:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    return pool.submit(lambda: asyncio.run(coro)).result()
+            else:
+                fut = asyncio.run_coroutine_threadsafe(coro, MAIN_EVENT_LOOP)
+                return fut.result(timeout=15)
+        except Exception as exc:
+            logger.error("Error scheduling coroutine on MAIN_EVENT_LOOP: %s", exc)
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -49,7 +72,6 @@ def run_sync_coro(coro: Any) -> Any:
 
     if loop is not None and loop.is_running():
         import concurrent.futures
-
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(lambda: asyncio.run(coro)).result()
     else:
@@ -274,8 +296,10 @@ def run_listener(comm_client: CommClient) -> None:
 
 async def main() -> None:
     """Main async entry point for starting the Caspian Listener Agent."""
+    global MAIN_EVENT_LOOP
     logger.info("Starting Caspian Listener Agent Daemon...")
     try:
+        MAIN_EVENT_LOOP = asyncio.get_running_loop()
         await db.init_db_pool()
         connect_channels(client)
 
@@ -285,6 +309,7 @@ async def main() -> None:
     finally:
         await db.close_db_pool()
         client.close()
+        MAIN_EVENT_LOOP = None
 
 
 if __name__ == "__main__":
