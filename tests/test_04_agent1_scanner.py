@@ -531,12 +531,13 @@ async def test_gemini_scanner_exception_resilience():
     repo_context = {"repo": "err-repo", "owner": "test", "language": "Python"}
 
     with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key"}):
-        with patch("google.generativeai.GenerativeModel") as mock_model_cls:
-            mock_model = MagicMock()
-            mock_model.generate_content.side_effect = Exception("API quota exceeded")
-            mock_model_cls.return_value = mock_model
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.aio.models.generate_content = AsyncMock(side_effect=Exception("API quota exceeded"))
+            mock_client_cls.return_value = mock_client
 
             res = await evaluate_repository(repo_context)
+
             assert res["ai_difficulty"] == 65.0
             assert res["ai_authenticity"] == 75.0
             assert res["ai_creativity"] == 70.0

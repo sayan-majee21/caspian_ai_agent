@@ -9,7 +9,8 @@ import json
 import logging
 import os
 from typing import Any
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger("talentcaspian.gemini_scanner")
 
@@ -89,16 +90,7 @@ async def evaluate_repository(
 
     async with _gemini_semaphore:
         try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                system_instruction=EVALUATION_SYSTEM_PROMPT,
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.2,
-                },
-            )
-
+            client = genai.Client(api_key=key)
             prompt_content = f"""
             Repository Name: {repo_context.get('repo')}
             Owner: {repo_context.get('owner')}
@@ -116,7 +108,16 @@ async def evaluate_repository(
             {json.dumps(repo_context.get('source_files', {}))[:10000]}
             """
 
-            response = await asyncio.to_thread(model.generate_content, prompt_content)
+            response = await client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt_content,
+                config=types.GenerateContentConfig(
+                    system_instruction=EVALUATION_SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            )
+
             res_text = response.text.strip()
             if res_text.startswith("```"):
                 lines = res_text.splitlines()
@@ -192,11 +193,7 @@ async def classify_push_update(
 
     async with _gemini_semaphore:
         try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                generation_config={"temperature": 0.0},
-            )
+            client = genai.Client(api_key=key)
             prompt = f"""
             Given these commit messages and modified file paths, is this a 'Major' functional update or a 'Minor' update (e.g. typos, readme tweaks, formatting)?
 
@@ -208,7 +205,11 @@ async def classify_push_update(
 
             Respond with ONLY one word: "Major" or "Minor".
             """
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.0),
+            )
             ans = response.text.strip().capitalize()
             return "Minor" if "Minor" in ans else "Major"
         except Exception as exc:
@@ -243,14 +244,7 @@ async def check_suggestion_resolution(
 
     async with _gemini_semaphore:
         try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.0,
-                },
-            )
+            client = genai.Client(api_key=key)
             prompt = f"""
             Analyze whether the following code push addresses and resolves the recruiter's suggestion.
 
@@ -265,7 +259,14 @@ async def check_suggestion_resolution(
 
             Return JSON: {{"resolved": true}} or {{"resolved": false}}.
             """
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                ),
+            )
             res_text = response.text.strip()
             if res_text.startswith("```"):
                 lines = res_text.splitlines()
@@ -280,3 +281,4 @@ async def check_suggestion_resolution(
         except Exception as exc:
             logger.warning(f"Suggestion resolution check failed: {exc}")
             return any(w in joined_commits for w in sugg_words) if sugg_words else False
+

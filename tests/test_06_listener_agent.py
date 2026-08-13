@@ -80,16 +80,16 @@ async def test_gemini_parser_mocked():
     mock_response = MagicMock()
     mock_response.text = '{"intent": "suggestion", "suggestion_text": "Add Docker setup", "rating": null}'
 
-    with patch("google.generativeai.GenerativeModel") as mock_model_cls, \
-         patch("google.generativeai.configure"):
+    with patch("google.genai.Client") as mock_client_cls:
         mock_instance = MagicMock()
-        mock_instance.generate_content_async = AsyncMock(return_value=mock_response)
-        mock_model_cls.return_value = mock_instance
+        mock_instance.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_instance
 
         res = await parse_recruiter_reply("Need docker setup", api_key="mock_gemini_key")
         assert res["intent"] == "suggestion"
         assert res["suggestion_text"] == "Add Docker setup"
         assert res["rating"] is None
+
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,8 @@ import logging
 import os
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger("talentcaspian.outreach_service")
 
@@ -85,13 +86,7 @@ async def generate_outreach_message(
 
     async with _gemini_semaphore:
         try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                system_instruction=OUTREACH_SYSTEM_PROMPT,
-                generation_config={"temperature": 0.3},
-            )
-
+            client = genai.Client(api_key=key)
             prompt = f"""
             Recruiter Name: {recruiter_name}
             Student Name: {student_name}
@@ -103,12 +98,20 @@ async def generate_outreach_message(
             Generate a concise, professional notification message for {recruiter_name}.
             """
 
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=OUTREACH_SYSTEM_PROMPT,
+                    temperature=0.3,
+                ),
+            )
             msg = response.text.strip()
             if msg:
                 return msg
         except Exception as exc:
             logger.warning(f"Gemini API call failed for outreach generation: {exc}. Using fallback.")
+
 
     return (
         f"Hi {recruiter_name}, student {student_name}'s project ({repo_url}) matches your interest in {tags_str}! "

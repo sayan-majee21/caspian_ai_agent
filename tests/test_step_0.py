@@ -15,8 +15,9 @@ def test_imports():
     import asyncpg
     import pydantic
     import httpx
-    import google.generativeai
+    from google import genai
     from caspian_sdk import CommClient, Message
+
     
     assert fastapi.__version__ is not None
     assert pydantic.__version__ is not None

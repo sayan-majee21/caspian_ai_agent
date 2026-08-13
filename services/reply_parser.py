@@ -10,10 +10,12 @@ import logging
 import os
 import re
 from typing import Any
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 logger = logging.getLogger("talentcaspian.reply_parser")
+
 
 
 # Global semaphore for rate limiting Gemini API calls
@@ -133,10 +135,17 @@ Output ONLY the JSON object, with no markdown formatting or extra commentary."""
 
     try:
         async with _gemini_semaphore:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = await model.generate_content_async(prompt)
+            client = genai.Client(api_key=key)
+            response = await client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                ),
+            )
             raw_output = response.text.strip()
+
 
         # Clean code block backticks if present
         if raw_output.startswith("```"):
