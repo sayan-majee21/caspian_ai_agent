@@ -20,3 +20,8 @@ agency-agents/
 agency-agents-app/
 andrej-karpathy-skills/
 
+# Testing & CLI caches
+.pytest_cache/
+.hypothesis/
+.gemini/
+
