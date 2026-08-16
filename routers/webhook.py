@@ -179,6 +179,18 @@ async def process_push_webhook_bg(payload: dict[str, Any], delivery_id: str) -> 
 
 
 @router.post(
+    "",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="GitHub push webhook handler (root alias)",
+    description="Validates HMAC signature, checks delivery idempotency, and enqueues push event processing.",
+)
+@router.post(
+    "/",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="GitHub push webhook handler (slash alias)",
+    description="Validates HMAC signature, checks delivery idempotency, and enqueues push event processing.",
+)
+@router.post(
     "/github",
     status_code=status.HTTP_202_ACCEPTED,
     summary="GitHub push webhook handler",

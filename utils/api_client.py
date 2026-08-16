@@ -663,7 +663,7 @@ def api_trigger_webhook(
         headers["X-Hub-Signature-256"] = f"sha256={sig}"
 
     with _build_client() as client:
-        response = client.post("/api/webhook", content=body_bytes, headers=headers)
+        response = client.post("/api/webhook/github", content=body_bytes, headers=headers)
         if response.status_code in (200, 202):
             clear_api_cache()
             return response.json()
