@@ -66,7 +66,7 @@ GEMINI_API_KEY=AIzaSy_YOUR_ACTUAL_GEMINI_KEY_HERE
 
 # Real Caspian & Telegram Credentials
 CASPIAN_API_KEY=your_actual_caspian_key_here
-CASPIAN_BASE_URL=https://api.caspian.network
+CASPIAN_BASE_URL=https://api.trycaspianai.com
 TELEGRAM_BOT_TOKEN=123456789:YOUR_ACTUAL_TELEGRAM_BOT_TOKEN_HERE
 CASPIAN_EMAIL_USER=your_email@gmail.com
 

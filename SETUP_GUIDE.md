@@ -96,7 +96,7 @@ GEMINI_API_KEY=your_google_gemini_api_key
 
 # -- Caspian Multi-Channel Network SDK --
 CASPIAN_API_KEY=your_caspian_network_api_key
-CASPIAN_BASE_URL=https://api.caspian.network
+CASPIAN_BASE_URL=https://api.trycaspianai.com
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 CASPIAN_EMAIL_USER=your_email_address@example.com
 

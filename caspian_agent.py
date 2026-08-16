@@ -37,7 +37,7 @@ if not api_key:
 # Initialize the single unified Caspian CommClient
 client: CommClient = CommClient(
     api_key=api_key,
-    base_url=os.getenv("CASPIAN_BASE_URL", "https://api.caspian.network"),
+    base_url=os.getenv("CASPIAN_BASE_URL", "https://api.trycaspianai.com"),
 )
 
 # Reference to the main asyncio event loop (where DB pool is initialized)
@@ -94,13 +94,15 @@ async def process_inbound_message(message: Message) -> dict[str, Any]:
     if isinstance(message.sender, dict):
         sender_info = (
             message.sender.get("email")
-            or message.sender.get("id")
+            or message.sender.get("username")
             or message.sender.get("handle")
+            or message.sender.get("id")
             or ""
         )
     else:
         sender_info = (
             getattr(message.sender, "email", None)
+            or getattr(message.sender, "username", None)
             or getattr(message.sender, "handle", None)
             or getattr(message.sender, "id", None)
             or str(message.sender or "")
@@ -286,8 +288,8 @@ def connect_channels(comm_client: CommClient) -> None:
     # Connect Telegram
     if telegram_token:
         try:
-            comm_client.connect_telegram(bot_token=telegram_token)
-            logger.info("✓ Telegram channel connected successfully.")
+            res_tg = comm_client.connect_telegram(bot_token=telegram_token)
+            logger.info("✓ Telegram channel connected successfully: %s", res_tg.get("address", ""))
         except Exception as exc:
             logger.warning("⚠ Could not connect Telegram channel to Caspian network: %s", exc)
     else:
@@ -296,8 +298,15 @@ def connect_channels(comm_client: CommClient) -> None:
     # Connect Email
     if email_user:
         try:
-            comm_client.connect_email(username=email_user)
-            logger.info("✓ Email channel connected successfully for user '%s'.", email_user)
+            try:
+                res_em = comm_client.connect_email(username=email_user)
+            except Exception:
+                if "@" in email_user:
+                    res_em = comm_client.connect_email(username=email_user.split("@")[0])
+                else:
+                    raise
+            addr = res_em.get("address", "") if isinstance(res_em, dict) else email_user
+            logger.info("✓ Email channel connected successfully: %s", addr)
         except Exception as exc:
             logger.warning("⚠ Could not connect Email channel to Caspian network: %s", exc)
     else:
