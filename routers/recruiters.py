@@ -4,7 +4,7 @@ import logging
 from typing import Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
 from database.db import (
@@ -20,6 +20,7 @@ from database.db import (
     remove_from_cart,
     update_recruiter_preferences,
 )
+from services.notification_service import notify_student_of_suggestion
 
 logger = logging.getLogger("talentcaspian.recruiters")
 
@@ -137,12 +138,14 @@ async def get_recruiter_profile(
 )
 async def create_suggestion(
     payload: SuggestionCreateRequest,
+    background_tasks: BackgroundTasks,
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> dict[str, Any]:
-    """Submit project feedback suggestion.
+    """Submit project feedback suggestion and notify student.
 
     Args:
         payload (SuggestionCreateRequest): Suggestion payload.
+        background_tasks (BackgroundTasks): Background tasks manager.
         conn (asyncpg.Connection): Active database connection.
 
     Returns:
@@ -168,6 +171,14 @@ async def create_suggestion(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Referenced project or recruiter not found",
         )
+
+    # Automatically notify student about the recruiter suggestion
+    background_tasks.add_task(
+        notify_student_of_suggestion,
+        payload.project_id,
+        payload.recruiter_id,
+        clean_text,
+    )
 
     return {
         "status": "success",

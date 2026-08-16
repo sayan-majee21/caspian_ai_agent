@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from caspian_sdk import CommClient, Message
 import database.db as db
+from services.notification_service import notify_student_of_suggestion
 from services.reply_parser import parse_recruiter_reply
 
 # Setup logger for Caspian agent daemon
@@ -193,6 +194,16 @@ async def process_inbound_message(message: Message) -> dict[str, Any]:
             recruiter_id,
             sug_text,
         )
+        try:
+            await notify_student_of_suggestion(
+                project_id,
+                recruiter_id,
+                sug_text,
+                project=proj if "proj" in locals() and proj else None,
+                recruiter=recruiter,
+            )
+        except Exception as notify_err:
+            logger.warning("[Caspian Listener] Could not send student notification: %s", notify_err)
 
     if rating_val is not None:
         await db.add_project_rating(
