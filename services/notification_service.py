@@ -76,18 +76,23 @@ async def process_notifications(
                 message = await generate_outreach_message(rec, project)
                 dispatch_res = await asyncio.to_thread(dispatch_message, rec, message, client=client)
 
-                channel = rec.get("preferred_channel", "email") or "email"
-                await db.create_notification_log(
-                    db_conn,
-                    recruiter_id=rec_id,
-                    project_id=project_id,
-                    channel=channel,
-                    is_followup=False,
-                )
-                processed_count += 1
-                logger.info(
-                    f"Successfully processed notification for recruiter_id={rec_id}, project_id={project_id}"
-                )
+                if dispatch_res.get("status") != "failed":
+                    channel = rec.get("preferred_channel", "email") or "email"
+                    await db.create_notification_log(
+                        db_conn,
+                        recruiter_id=rec_id,
+                        project_id=project_id,
+                        channel=channel,
+                        is_followup=False,
+                    )
+                    processed_count += 1
+                    logger.info(
+                        f"Successfully processed notification for recruiter_id={rec_id}, project_id={project_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"Notification dispatch returned failed for recruiter_id={rec_id}, project_id={project_id}: {dispatch_res.get('error')}"
+                    )
             except Exception as rec_exc:
                 logger.error(
                     f"Failed processing notification for recruiter_id={rec_id}, project_id={project_id}: {rec_exc}",

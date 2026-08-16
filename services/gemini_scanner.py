@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from typing import Any
 from google import genai
 from google.genai import types
@@ -120,25 +121,19 @@ async def evaluate_repository(
             )
 
             res_text = response.text.strip()
-            if res_text.startswith("```"):
-                lines = res_text.splitlines()
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                res_text = "\n".join(lines).strip()
+            json_match = re.search(r"\{[\s\S]*\}", res_text)
+            if json_match:
+                res_text = json_match.group(0)
 
             data = json.loads(res_text)
 
-
-            diff = float(data.get("difficulty", 70.0))
-            auth = float(data.get("authenticity", 75.0))
-            crea = float(data.get("creativity", 70.0))
+            diff = float(data.get("difficulty") or 70.0)
+            auth = float(data.get("authenticity") or 75.0)
+            crea = float(data.get("creativity") or 70.0)
             score = calculate_weighted_ai_score(diff, auth, crea)
-            tags = data.get("tags", ["python", "backend"])
-            if not isinstance(tags, list):
-                tags = [str(tags)]
-            summary = str(data.get("summary", "Portfolio project repository."))
+            raw_tags = data.get("tags") or ["python", "backend"]
+            tags = [str(t) for t in raw_tags if t] if isinstance(raw_tags, list) else [str(raw_tags)]
+            summary = str(data.get("summary") or "Portfolio project repository.")
 
             return {
                 "ai_difficulty": diff,
@@ -166,31 +161,33 @@ async def classify_push_update(
     modified_files: list[str],
     api_key: str | None = None,
 ) -> str:
-    """Classify a git push event as a 'Major' functional update or a 'Minor' update.
+    """Classify whether a push update is 'Major' or 'Minor'.
 
     Args:
-        commit_messages (list[str]): List of commit messages in the push.
+        commit_messages (list[str]): List of commit message strings in the push.
         modified_files (list[str]): List of modified/added file paths.
         api_key (str | None): Optional Gemini API key override.
 
     Returns:
-        str: "Major" or "Minor".
+        str: 'Major' or 'Minor'.
     """
-    # Quick heuristics check for obvious minor updates
     joined_commits = " ".join(commit_messages).lower()
     only_docs = all(
         f.lower().endswith(".md") or f.lower().startswith("docs/")
         for f in modified_files
     ) if modified_files else False
 
-    if only_docs or any(kw in joined_commits for kw in ["typo", "readme", "formatting", "style tweak", "bump version"]):
-        if not any(kw in joined_commits for kw in ["feat", "fix", "add", "refactor", "implement"]):
-            return "Minor"
+    has_minor_kw = bool(re.search(r"\b(typo|readme|formatting|style tweak|bump version|docs?)\b", joined_commits))
+    has_major_kw = bool(re.search(r"\b(feat|feature|refactor|implement|breaking)\b", joined_commits))
+    if re.search(r"\bfix\b", joined_commits) and not re.search(r"\bfix(?:ed|ing)?\s+(?:typo|readme|docs?|format)", joined_commits):
+        has_major_kw = True
+
+    if (only_docs or has_minor_kw) and not has_major_kw:
+        return "Minor"
 
     key = api_key if api_key is not None else os.getenv("GEMINI_API_KEY")
 
     if not key:
-        # Default heuristics when API key is missing
         return "Minor" if only_docs else "Major"
 
     async with _gemini_semaphore:
@@ -212,11 +209,31 @@ async def classify_push_update(
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.0),
             )
-            ans = response.text.strip().capitalize()
-            return "Minor" if "Minor" in ans else "Major"
+            match = re.search(r"\b(major|minor)\b", response.text, re.IGNORECASE)
+            if match:
+                return match.group(1).capitalize()
+            return "Major"
         except Exception as exc:
             logger.warning(f"Push classification call failed, defaulting: {exc}")
             return "Major"
+
+
+def _fallback_keyword_resolution_match(
+    suggestion_text: str,
+    commit_messages: list[str],
+    modified_files: list[str] | None = None,
+) -> bool:
+    """Helper to perform heuristic keyword resolution matching on commit messages and modified files."""
+    stop_words = {
+        "please", "would", "could", "should", "about", "there", "their", "where",
+        "which", "these", "those", "after", "before", "while", "using", "project",
+        "code", "make", "need", "needs", "also", "with", "from", "have", "your", "this", "that", "more", "some"
+    }
+    all_text = (" ".join(commit_messages) + " " + " ".join(modified_files or [])).lower()
+    sig_words = [w.lower() for w in re.findall(r"\b\w{3,}\b", suggestion_text) if w.lower() not in stop_words]
+    if not sig_words:
+        return False
+    return any(w in all_text for w in sig_words)
 
 
 async def check_suggestion_resolution(
@@ -238,12 +255,8 @@ async def check_suggestion_resolution(
     """
     key = api_key if api_key is not None else os.getenv("GEMINI_API_KEY")
 
-    joined_commits = " ".join(commit_messages).lower()
-    sugg_words = [w.lower() for w in suggestion_text.split() if len(w) > 3]
-
     if not key:
-        # Basic keyword match fallback
-        return any(w in joined_commits for w in sugg_words) if sugg_words else False
+        return _fallback_keyword_resolution_match(suggestion_text, commit_messages, modified_files)
 
     async with _gemini_semaphore:
         try:
@@ -271,17 +284,15 @@ async def check_suggestion_resolution(
                 ),
             )
             res_text = response.text.strip()
-            if res_text.startswith("```"):
-                lines = res_text.splitlines()
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                res_text = "\n".join(lines).strip()
+            json_match = re.search(r"\{[\s\S]*\}", res_text)
+            if json_match:
+                res_text = json_match.group(0)
             data = json.loads(res_text)
-            return bool(data.get("resolved", False))
+            raw_resolved = data.get("resolved", False)
+            if isinstance(raw_resolved, str):
+                return raw_resolved.strip().lower() in ("true", "1", "yes")
+            return bool(raw_resolved)
 
         except Exception as exc:
             logger.warning(f"Suggestion resolution check failed: {exc}")
-            return any(w in joined_commits for w in sugg_words) if sugg_words else False
-
+            return _fallback_keyword_resolution_match(suggestion_text, commit_messages, modified_files)

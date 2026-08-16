@@ -261,9 +261,9 @@ async def get_student_by_email_or_username(
     sql = """
     SELECT id, name, email, github_username, created_at
     FROM students
-    WHERE email = $1 OR github_username = $2;
+    WHERE LOWER(email) = LOWER($1) OR LOWER(github_username) = LOWER($2);
     """
-    row = await conn_or_pool.fetchrow(sql, email, github_username)
+    row = await conn_or_pool.fetchrow(sql, email.strip(), github_username.strip())
     return dict(row) if row else None
 
 
@@ -597,7 +597,7 @@ async def get_recruiter_matches(
     Returns:
         list[dict[str, Any]]: Matching projects list.
     """
-    sql = """
+    sql = r"""
     SELECT p.id, p.student_id, p.repo_url, p.summary, p.tags, p.ai_difficulty,
            p.ai_authenticity, p.ai_creativity, p.ai_score, p.final_score,
            p.last_scanned_at, p.created_at,
@@ -605,7 +605,11 @@ async def get_recruiter_matches(
     FROM projects p
     JOIN students s ON p.student_id = s.id, recruiters r
     WHERE r.id = $1
-      AND COALESCE(p.final_score, 0) >= COALESCE((r.preference_filters->>'min_score')::float, 0)
+      AND COALESCE(p.final_score, 0) >= CASE 
+          WHEN (r.preference_filters->>'min_score') ~ '^[0-9]+(\.[0-9]+)?$' 
+          THEN (r.preference_filters->>'min_score')::float 
+          ELSE 0.0 
+      END
       AND (
         r.preference_filters->'tech_stack' IS NULL 
         OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
@@ -618,8 +622,8 @@ async def get_recruiter_matches(
           AND EXISTS (
             SELECT 1 
             FROM jsonb_array_elements_text(p.tags) tag
-            WHERE tag = ANY (
-              SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+            WHERE LOWER(tag) = ANY (
+              SELECT LOWER(t) FROM jsonb_array_elements_text(r.preference_filters->'tech_stack') t
             )
           )
         )
@@ -648,11 +652,15 @@ async def find_matches(
     Returns:
         list[dict[str, Any]]: Matching recruiters list.
     """
-    sql = """
+    sql = r"""
     SELECT r.id, r.name, r.email, r.preferred_channel, r.telegram_handle, r.preference_filters, r.created_at
     FROM recruiters r, projects p
     WHERE p.id = $1
-      AND COALESCE(p.final_score, 0) >= COALESCE((r.preference_filters->>'min_score')::float, 0)
+      AND COALESCE(p.final_score, 0) >= CASE 
+          WHEN (r.preference_filters->>'min_score') ~ '^[0-9]+(\.[0-9]+)?$' 
+          THEN (r.preference_filters->>'min_score')::float 
+          ELSE 0.0 
+      END
       AND (
         r.preference_filters->'tech_stack' IS NULL
         OR jsonb_typeof(r.preference_filters->'tech_stack') != 'array'
@@ -665,8 +673,8 @@ async def find_matches(
           AND EXISTS (
             SELECT 1
             FROM jsonb_array_elements_text(p.tags) tag
-            WHERE tag = ANY (
-              SELECT jsonb_array_elements_text(r.preference_filters->'tech_stack')
+            WHERE LOWER(tag) = ANY (
+              SELECT LOWER(t) FROM jsonb_array_elements_text(r.preference_filters->'tech_stack') t
             )
           )
         )
@@ -789,14 +797,15 @@ async def get_project_by_repo_url(
     Returns:
         dict[str, Any] | None: Project record if found, None otherwise.
     """
-    clean_url = repo_url.rstrip("/").removesuffix(".git")
+    clean_url = repo_url.rstrip("/").removesuffix(".git").lower()
     sql = """
     SELECT * FROM projects
-    WHERE LOWER(repo_url) = LOWER($1)
-       OR LOWER(repo_url) = LOWER($2)
-       OR LOWER(repo_url) LIKE LOWER($3);
+    WHERE LOWER(repo_url) = $1
+       OR LOWER(repo_url) = $1 || '.git'
+       OR LOWER(repo_url) = $1 || '/'
+       OR LOWER(repo_url) = $1 || '/.git';
     """
-    row = await conn_or_pool.fetchrow(sql, repo_url, clean_url, f"%{clean_url}%")
+    row = await conn_or_pool.fetchrow(sql, clean_url)
     if not row:
         return None
     res = dict(row)

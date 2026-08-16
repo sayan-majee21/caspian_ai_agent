@@ -113,8 +113,14 @@ def create_score_breakdown_bars(metrics: list[dict[str, Any]]) -> go.Figure:
             {"name": "Project Creativity (30%)", "score": 0.0},
         ]
 
+    def _safe_float(val: Any) -> float:
+        try:
+            return float(val) if val is not None else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
     names = [m.get("name", "Metric") for m in metrics]
-    scores = [float(m.get("score") or 0.0) for m in metrics]
+    scores = [_safe_float(m.get("score")) for m in metrics]
 
     colors = []
     for s in scores:
@@ -133,44 +139,38 @@ def create_score_breakdown_bars(metrics: list[dict[str, Any]]) -> go.Figure:
             marker=dict(
                 color=colors,
                 line=dict(color="rgba(255, 255, 255, 0.15)", width=1),
-                opacity=0.9,
             ),
-            text=[f"{s:.1f} pts" for s in scores],
+            text=[f"{s:.1f}/100" for s in scores],
             textposition="auto",
-            textfont=dict(color="#FFFFFF", size=11, family="Inter, sans-serif"),
         )
     )
 
-    layout = _get_theme_layout("Component Score Contributions", height=240)
+    layout = _get_theme_layout("Metric Breakdown", height=240)
     layout["xaxis"] = dict(
-        range=[0, 100],
+        range=[0, 105],
         showgrid=True,
         gridcolor="rgba(51, 65, 85, 0.4)",
         zeroline=False,
-        tickfont=dict(size=10, color="#64748B"),
     )
-    layout["yaxis"] = dict(
-        autorange="reversed",
-        tickfont=dict(size=12, color="#E2E8F0"),
-    )
+    layout["yaxis"] = dict(autorange="reversed")
     layout["showlegend"] = False
     fig.update_layout(**layout)
     return fig
 
 
 def create_rating_timeline_chart(ratings: list[dict[str, Any]]) -> go.Figure:
-    """Create rating trajectory line chart comparing peer vs recruiter evaluations over time.
+    """Create rating trajectory spline chart comparing peer community vs recruiter evaluations.
 
     Args:
-        ratings (list[dict[str, Any]]): List of rating history entries.
+        ratings (list[dict[str, Any]]): List of timestamped rating records.
 
     Returns:
-        go.Figure: Plotly line chart.
+        go.Figure: Plotly line chart figure.
     """
     if not ratings:
         fig = go.Figure()
         fig.add_annotation(
-            text="No historical rating datapoints recorded yet.<br>Ratings submitted by peers and recruiters will appear here.",
+            text="No community or recruiter ratings recorded yet.",
             xref="paper",
             yref="paper",
             x=0.5,
@@ -183,12 +183,19 @@ def create_rating_timeline_chart(ratings: list[dict[str, Any]]) -> go.Figure:
         return fig
 
     df = pd.DataFrame(ratings)
-    df["created_at"] = pd.to_datetime(df.get("created_at", pd.Timestamp.now()))
+    if "created_at" in df.columns:
+        df["created_at"] = pd.to_datetime(df["created_at"])
+    else:
+        df["created_at"] = pd.Timestamp.now()
+    if "rater_type" not in df.columns:
+        df["rater_type"] = "public"
+    if "rating" not in df.columns:
+        df["rating"] = 5.0
     df = df.sort_values("created_at")
 
     fig = go.Figure()
 
-    peer_df = df[df.get("rater_type", "public") == "public"]
+    peer_df = df[df["rater_type"] != "recruiter"]
     if not peer_df.empty:
         fig.add_trace(
             go.Scatter(
@@ -201,7 +208,7 @@ def create_rating_timeline_chart(ratings: list[dict[str, Any]]) -> go.Figure:
             )
         )
 
-    recruiter_df = df[df.get("rater_type") == "recruiter"]
+    recruiter_df = df[df["rater_type"] == "recruiter"]
     if not recruiter_df.empty:
         fig.add_trace(
             go.Scatter(
@@ -255,13 +262,18 @@ def create_commit_activity_chart(commits: list[dict[str, Any]]) -> go.Figure:
         return fig
 
     df = pd.DataFrame(commits)
-    df["created_at"] = pd.to_datetime(df.get("created_at", pd.Timestamp.now()))
+    if "created_at" in df.columns:
+        df["created_at"] = pd.to_datetime(df["created_at"])
+    else:
+        df["created_at"] = pd.Timestamp.now()
     df = df.sort_values("created_at")
 
     # Group by classification
-    classifications = df.get("change_classification", "minor").fillna("minor")
-    major_count = (classifications == "major").sum()
-    minor_count = (classifications == "minor").sum()
+    if "change_classification" not in df.columns:
+        df["change_classification"] = "minor"
+    classifications = df["change_classification"].fillna("minor").astype(str).str.lower()
+    major_count = int((classifications == "major").sum())
+    minor_count = int((classifications == "minor").sum())
 
     fig = go.Figure(
         go.Bar(

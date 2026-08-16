@@ -90,11 +90,20 @@ async def process_inbound_message(message: Message) -> dict[str, Any]:
     Returns:
         dict[str, Any]: Status and result summary of message processing.
     """
-    sender_info = (
-        message.sender.get("email") or message.sender.get("id") or message.sender.get("handle")
-        if isinstance(message.sender, dict)
-        else str(message.sender or "")
-    )
+    if isinstance(message.sender, dict):
+        sender_info = (
+            message.sender.get("email")
+            or message.sender.get("id")
+            or message.sender.get("handle")
+            or ""
+        )
+    else:
+        sender_info = (
+            getattr(message.sender, "email", None)
+            or getattr(message.sender, "handle", None)
+            or getattr(message.sender, "id", None)
+            or str(message.sender or "")
+        )
     msg_text = message.text or ""
     channel = getattr(message, "channel", "email") or "email"
 
@@ -285,13 +294,26 @@ def connect_channels(comm_client: CommClient) -> None:
 
 
 def run_listener(comm_client: CommClient) -> None:
-    """Start the blocking event listener loop for the Caspian client.
+    """Start the event listener loop for the Caspian client with reconnection resilience.
 
     Args:
         comm_client (CommClient): The instantiated Caspian client.
     """
     logger.info("Listening for incoming messages across all connected channels...")
-    comm_client.listen()
+    retry_delay = 2
+    while True:
+        try:
+            comm_client.listen()
+            break
+        except Exception as exc:
+            logger.error(
+                "Caspian listener loop encountered error: %s. Reconnecting in %ss...",
+                exc,
+                retry_delay,
+            )
+            import time
+            time.sleep(retry_delay)
+            retry_delay = min(30, retry_delay * 2)
 
 
 async def main() -> None:

@@ -53,6 +53,18 @@ def clear_api_cache() -> None:
     st.cache_data.clear()
 
 
+def _extract_error_detail(response: httpx.Response, default: str = "Request failed.") -> str:
+    """Safely extract error detail string from an HTTP response."""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            return str(data.get("detail") or default)
+        return str(data)
+    except Exception:
+        text = response.text.strip()
+        return text[:120] if text else f"{default} (HTTP {response.status_code})"
+
+
 # ==========================================
 # 1. AUTHENTICATION & REGISTRATION
 # ==========================================
@@ -76,7 +88,7 @@ def api_login(email: str, user_type: str = "student") -> dict[str, Any]:
         response = client.post("/api/login", json=payload)
         if response.status_code == 200:
             return response.json()
-        error_detail = response.json().get("detail", "Login failed. User not found.")
+        error_detail = _extract_error_detail(response, "Login failed. User not found.")
         raise ValueError(error_detail)
 
 
@@ -110,7 +122,7 @@ def api_register_student(
         if response.status_code in (200, 201):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Registration failed.")
+        detail = _extract_error_detail(response, "Registration failed.")
         raise ValueError(detail)
 
 
@@ -147,7 +159,7 @@ def api_register_recruiter(
         if response.status_code in (200, 201):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Recruiter registration failed.")
+        detail = _extract_error_detail(response, "Recruiter registration failed.")
         raise ValueError(detail)
 
 
@@ -216,7 +228,7 @@ def fetch_student_profile(student_id: int) -> dict[str, Any]:
         response = client.get(f"/api/student/{student_id}")
         if response.status_code == 200:
             return response.json()
-        detail = response.json().get("detail", f"Student #{student_id} not found")
+        detail = _extract_error_detail(response, f"Student #{student_id} not found")
         raise ValueError(detail)
 
 
@@ -351,7 +363,7 @@ def api_rate_project(
         if response.status_code in (200, 201):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Rating submission failed.")
+        detail = _extract_error_detail(response, "Rating submission failed.")
         raise ValueError(detail)
 
 
@@ -382,7 +394,7 @@ def api_submit_peer_suggestion(
         if response.status_code in (200, 201):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Feedback submission failed.")
+        detail = _extract_error_detail(response, "Feedback submission failed.")
         raise ValueError(detail)
 
 
@@ -405,7 +417,7 @@ def api_add_project(student_id: int, repo_url: str) -> dict[str, Any]:
         if response.status_code in (200, 201):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Failed to add project.")
+        detail = _extract_error_detail(response, "Failed to add project.")
         raise ValueError(detail)
 
 
@@ -484,7 +496,7 @@ def api_add_to_cart(recruiter_id: int, project_id: int) -> dict[str, Any]:
         if response.status_code in (200, 201):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Failed to add candidate to cart.")
+        detail = _extract_error_detail(response, "Failed to add candidate to cart.")
         raise ValueError(detail)
 
 
@@ -502,7 +514,7 @@ def api_remove_from_cart_by_item(item_id: int) -> dict[str, Any]:
         if response.status_code == 200:
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Failed to remove item from cart.")
+        detail = _extract_error_detail(response, "Failed to remove item from cart.")
         raise ValueError(detail)
 
 
@@ -521,7 +533,7 @@ def api_remove_from_cart(recruiter_id: int, project_id: int) -> dict[str, Any]:
         if response.status_code == 200:
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Failed to remove project from cart.")
+        detail = _extract_error_detail(response, "Failed to remove project from cart.")
         raise ValueError(detail)
 
 
@@ -550,7 +562,7 @@ def api_submit_suggestion(
         if response.status_code in (200, 201):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Failed to submit suggestion.")
+        detail = _extract_error_detail(response, "Failed to submit suggestion.")
         raise ValueError(detail)
 
 
@@ -573,7 +585,7 @@ def api_update_recruiter_preferences(
         if response.status_code == 200:
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Failed to update preferences.")
+        detail = _extract_error_detail(response, "Failed to update preferences.")
         raise ValueError(detail)
 
 
@@ -603,7 +615,7 @@ def api_admin_scan(
         if response.status_code in (200, 202):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", "Admin scan failed.")
+        detail = _extract_error_detail(response, "Admin scan failed.")
         raise ValueError(detail)
 
 
@@ -629,7 +641,7 @@ def api_admin_notify(
         response = client.post("/api/admin/notify", json=payload, headers=headers)
         if response.status_code in (200, 202):
             return response.json()
-        detail = response.json().get("detail", "Admin notification dispatch failed.")
+        detail = _extract_error_detail(response, "Admin notification dispatch failed.")
         raise ValueError(detail)
 
 
@@ -667,5 +679,5 @@ def api_trigger_webhook(
         if response.status_code in (200, 202):
             clear_api_cache()
             return response.json()
-        detail = response.json().get("detail", f"Webhook failed with status {response.status_code}")
+        detail = _extract_error_detail(response, f"Webhook failed with status {response.status_code}")
         raise ValueError(detail)

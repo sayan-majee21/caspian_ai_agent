@@ -96,10 +96,12 @@ with tab1:
         f_col1, f_col2, f_col3 = st.columns([0.45, 0.35, 0.2])
 
         with f_col1:
+            tech_options = ["fastapi", "react", "python", "postgresql", "docker", "machine-learning", "typescript", "node", "aws", "fullstack", "django", "vue", "golang"]
+            safe_defaults = [t for t in standing_tags if t in tech_options] if isinstance(standing_tags, list) else ["python"]
             active_tech_filter = st.multiselect(
                 "Filter by Tech Stack",
-                options=["fastapi", "react", "python", "postgresql", "docker", "machine-learning", "typescript", "node", "aws"],
-                default=standing_tags if isinstance(standing_tags, list) else ["python"],
+                options=tech_options,
+                default=safe_defaults or ["python"],
                 key="rec_tech_filter",
             )
         with f_col2:
@@ -262,10 +264,12 @@ with tab3:
         for item in cart_items:
             item_id = item.get("id") or item.get("cart_item_id")
             p_id = item.get("project_id")
-            repo = item.get("repo_url", f"Project #{p_id}")
-            p_name = repo.split("/")[-1] if "/" in repo else f"Project #{p_id}"
-            author = item.get("student_name") or item.get("author") or "Student"
-            score = item.get("final_score") or item.get("ai_score")
+            proj_obj = item.get("project") or {}
+            student_obj = proj_obj.get("student") or {}
+            repo = proj_obj.get("repo_url") or item.get("repo_url") or f"Project #{p_id}"
+            p_name = repo.rstrip("/").split("/")[-1] if "/" in repo else f"Project #{p_id}"
+            author = student_obj.get("name") or item.get("student_name") or item.get("author") or "Student"
+            score = proj_obj.get("final_score") or proj_obj.get("ai_score") or item.get("final_score") or item.get("ai_score")
 
             with st.container(border=True):
                 c_c1, c_c2, c_c3 = st.columns([0.6, 0.25, 0.15])

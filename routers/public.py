@@ -644,7 +644,14 @@ async def submit_peer_suggestion(
         "student_name": payload.student_name.strip() or "Anonymous Peer",
         "feedback_text": clean_text,
     }
-    created = await add_peer_suggestion(conn, peer_data)
+    try:
+        created = await add_peer_suggestion(conn, peer_data)
+    except asyncpg.ForeignKeyViolationError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Referenced student or project not found",
+        )
+
     return {
         "status": "success",
         "peer_suggestion": created,

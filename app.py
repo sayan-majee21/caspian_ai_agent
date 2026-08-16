@@ -75,8 +75,8 @@ with st.sidebar:
 
         if st.button("🚪 Log Out", use_container_width=True):
             logout_user_session()
-            st.toast("Logged out.", icon="👋")
-            st.rerun()
+            st.toast("Logged out successfully.", icon="👋")
+            st.switch_page("pages/0_landing.py")
     else:
         st.info("💡 Log in to submit ratings, access Personal Analytics, or shortlist candidates.")
 

@@ -101,12 +101,12 @@ else:
     # Render candidate project cards
     for proj in items:
         p_id = proj.get("id")
-        p_name = proj.get("repo_url", "Project").split("/")[-1] or f"Project #{p_id}"
+        repo_url = proj.get("repo_url") or ""
+        p_name = repo_url.rstrip("/").split("/")[-1] if repo_url else f"Project #{p_id}"
         author = proj.get("student_name") or proj.get("author") or "Candidate"
         summary = proj.get("summary") or "AI repository evaluation underway..."
         final_score = proj.get("final_score") or proj.get("ai_score")
         tags = proj.get("tags") or []
-        repo_url = proj.get("repo_url", "#")
 
         with st.container(border=True):
             c_header, c_score = st.columns([0.7, 0.3])

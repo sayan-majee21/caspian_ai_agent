@@ -99,24 +99,25 @@ with tab1:
         # Extract analytics fields
         project_record = analytics.get("project") or next((p for p in projects if p.get("id") == selected_proj_id), {})
         header_info = analytics.get("header") or {}
-        ai_score_hero = analytics.get("ai_score_hero") or {}
-        breakdown_list = analytics.get("metric_breakdown") or [
+        ai_score_hero = analytics.get("score_hero") or analytics.get("ai_score_hero") or {}
+        breakdown_list = analytics.get("metrics") or analytics.get("metric_breakdown") or [
             {"name": "Technical Quality (40%)", "score": project_record.get("ai_difficulty") or 0.0},
             {"name": "Code Authenticity (30%)", "score": project_record.get("ai_authenticity") or 0.0},
             {"name": "Project Creativity (30%)", "score": project_record.get("ai_creativity") or 0.0},
         ]
-        commit_history = analytics.get("commits") or []
+        evolution_data = analytics.get("evolution") or {}
+        commit_history = evolution_data.get("commits") or analytics.get("commits") or []
         recruiter_interest = analytics.get("recruiter_interest") or {}
         suggestions_list = analytics.get("recruiter_suggestions") or []
-        ai_recommendations = analytics.get("ai_next_steps") or [
+        ai_recommendations = analytics.get("ai_recommendations") or analytics.get("ai_next_steps") or [
             {"title": "Expand Unit & Integration Testing", "description": "Add Pytest or Jest test suites with coverage >80% to boost Technical Quality score.", "impact": "High Impact (+5-8 pts)"},
             {"title": "Add Comprehensive API Documentation", "description": "Ensure OpenAPI / docstrings are fully annotated for all router endpoints.", "impact": "Medium Impact (+3-5 pts)"},
             {"title": "Set up CI/CD GitHub Actions", "description": "Automate linting and continuous testing workflows on push.", "impact": "Medium Impact (+3-4 pts)"},
         ]
 
         # 1. Project Header Banner
-        repo_url = project_record.get("repo_url", "#")
-        p_name = repo_url.split("/")[-1] if "/" in repo_url else f"Project #{selected_proj_id}"
+        repo_url = project_record.get("repo_url") or ""
+        p_name = repo_url.rstrip("/").split("/")[-1] if repo_url else f"Project #{selected_proj_id}"
         
         with st.container(border=True):
             h_col1, h_col2 = st.columns([0.7, 0.3])
@@ -204,7 +205,7 @@ with tab1:
         rec_col1, rec_col2 = st.columns([0.4, 0.6])
 
         with rec_col1:
-            match_count = recruiter_interest.get("matching_recruiter_count", 0)
+            match_count = recruiter_interest.get("matched_recruiter_count") or recruiter_interest.get("matching_recruiter_count") or 0
             fig_rec = create_recruiter_demand_chart(match_count, total_pool=12)
             st.plotly_chart(fig_rec, use_container_width=True)
             st.caption(f"🎯 **{match_count} Tech Recruiters** currently have hiring filters matching this project's score and tech stack.")
