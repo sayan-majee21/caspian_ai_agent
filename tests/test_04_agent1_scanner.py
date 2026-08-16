@@ -208,7 +208,7 @@ async def test_evaluate_repository_fallback():
 @pytest.mark.asyncio
 async def test_classify_push_update_minor():
     """Test push classification for minor updates (documentation/typos)."""
-    res = await classify_push_update(["fix typo in README"], ["README.md"])
+    res = await classify_push_update(["fix typo in README"], ["README.md"], api_key="")
     assert res == "Minor"
 
 
@@ -216,9 +216,10 @@ async def test_classify_push_update_minor():
 async def test_classify_push_update_major():
     """Test push classification for major functional updates."""
     res = await classify_push_update(
-        ["feat: add postgres connection pool and endpoints"], ["main.py", "database/db.py"]
+        ["feat: add postgres connection pool and endpoints"], ["main.py", "database/db.py"], api_key=""
     )
     assert res == "Major"
+
 
 
 # ---------------------------------------------------------------------------
@@ -498,8 +499,11 @@ async def test_recruiter_suggestion_auto_resolution(setup_mock_db_pool_and_conne
 
     with patch("routers.webhook.scan_github_repository", AsyncMock(return_value=mock_scan)), patch(
         "routers.webhook.evaluate_repository", AsyncMock(return_value=mock_eval)
-    ), patch("routers.webhook.check_suggestion_resolution", AsyncMock(return_value=True)):
+    ), patch("routers.webhook.classify_push_update", AsyncMock(return_value="Major")), patch(
+        "routers.webhook.check_suggestion_resolution", AsyncMock(return_value=True)
+    ):
         await process_push_webhook_bg(webhook_payload, "delivery-sugg-7777")
+
 
     # Assert UPDATE suggestions SET resolved = TRUE was executed
     sugg_calls = [
@@ -531,12 +535,13 @@ async def test_gemini_scanner_exception_resilience():
     repo_context = {"repo": "err-repo", "owner": "test", "language": "Python"}
 
     with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key"}):
-        with patch("google.generativeai.GenerativeModel") as mock_model_cls:
-            mock_model = MagicMock()
-            mock_model.generate_content.side_effect = Exception("API quota exceeded")
-            mock_model_cls.return_value = mock_model
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.aio.models.generate_content = AsyncMock(side_effect=Exception("API quota exceeded"))
+            mock_client_cls.return_value = mock_client
 
             res = await evaluate_repository(repo_context)
+
             assert res["ai_difficulty"] == 65.0
             assert res["ai_authenticity"] == 75.0
             assert res["ai_creativity"] == 70.0

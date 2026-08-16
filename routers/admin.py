@@ -8,7 +8,9 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
+import database.db as db_module
 from services.notification_service import process_notifications
+
 
 logger = logging.getLogger("talentcaspian.admin")
 
@@ -53,17 +55,19 @@ def verify_admin_key(x_admin_api_key: str | None = Header(None, alias="X-Admin-A
 @router.post(
     "/scan",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger AI project scan stub",
-    description="Triggers the background AI code scanning process (Agent 1 stub).",
+    summary="Trigger AI project scan process",
+    description="Triggers the background AI code scanning process (Agent 1).",
 )
 async def trigger_admin_scan(
     payload: AdminScanRequest,
+    background_tasks: BackgroundTasks,
     x_admin_api_key: str | None = Header(None, alias="X-Admin-API-Key"),
 ) -> dict[str, Any]:
-    """Trigger AI scanning process stub.
+    """Trigger AI scanning background process.
 
     Args:
         payload (AdminScanRequest): Scan parameters.
+        background_tasks (BackgroundTasks): FastAPI background task manager.
         x_admin_api_key (str | None): Admin API Key header.
 
     Returns:
@@ -72,11 +76,26 @@ async def trigger_admin_scan(
     verify_admin_key(x_admin_api_key)
     logger.info(f"Admin scan triggered for project_id={payload.project_id}")
 
+    if payload.project_id and db_module.is_pool_ready() and db_module.DB_POOL is not None:
+        try:
+            from database.db import get_project_by_id
+            from routers.public import scan_and_evaluate_project_bg
+            async with db_module.DB_POOL.acquire() as conn:
+                project = await get_project_by_id(conn, payload.project_id)
+                if project and project.get("repo_url"):
+                    background_tasks.add_task(
+                        scan_and_evaluate_project_bg, payload.project_id, project["repo_url"]
+                    )
+        except Exception as exc:
+            logger.warning(f"Failed to lookup project for admin scan: {exc}")
+
+
     return {
         "status": "queued",
         "message": "AI scanning process queued",
         "project_id": payload.project_id,
     }
+
 
 
 @router.post(

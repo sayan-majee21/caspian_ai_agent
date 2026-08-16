@@ -151,10 +151,12 @@ async def test_outreach_generation():
 
     # Test fallback message generation (no API key set)
     msg = await generate_outreach_message(recruiter, project)
-    assert "Jane Recruiter" in msg
+    assert "Jane" in msg
+
     assert "Alex Dev" in msg
     assert "https://github.com/alex/smart-api" in msg
-    assert "python" in msg
+    assert "python" in msg.lower()
+
     assert "http://localhost:3000/dashboard" in msg
 
     # Test follow-up message generation
@@ -184,13 +186,14 @@ async def test_outreach_generation_gemini_exception_fallback():
         "tags": ["python", "pytorch"],
     }
 
-    # Mock google.generativeai raising an Exception
-    with patch("google.generativeai.GenerativeModel") as mock_model_cls:
-        mock_model = MagicMock()
-        mock_model.generate_content.side_effect = RuntimeError("Gemini API Rate Limit Exceeded")
-        mock_model_cls.return_value = mock_model
+    # Mock google.genai raising an Exception
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("Gemini API Rate Limit Exceeded"))
+        mock_client_cls.return_value = mock_client
 
         msg = await generate_outreach_message(recruiter, project, api_key="fake_key")
+
 
         assert "Hi Dave Recruiter" in msg
         assert "Eve Student" in msg

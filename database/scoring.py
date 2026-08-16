@@ -24,6 +24,8 @@ def calculate_bayesian_average(
         return m
     n = len(valid_ratings)
     sum_ratings = sum(valid_ratings)
+    if (C + n) <= 0:
+        return sum_ratings / n if n > 0 else m
     return (C * m + sum_ratings) / (C + n)
 
 

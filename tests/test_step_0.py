@@ -15,8 +15,9 @@ def test_imports():
     import asyncpg
     import pydantic
     import httpx
-    import google.generativeai
+    from google import genai
     from caspian_sdk import CommClient, Message
+
     
     assert fastapi.__version__ is not None
     assert pydantic.__version__ is not None
@@ -101,7 +102,7 @@ def test_webhook_signature_verification():
 def test_caspian_client_init():
     """Verify Caspian CommClient instantiates without error."""
     from caspian_sdk import CommClient
-    client = CommClient(api_key="test_key", base_url="https://api.caspian.network")
+    client = CommClient(api_key="test_key", base_url="https://api.trycaspianai.com")
     assert client is not None
 
 def test_cors_origins_parsing():

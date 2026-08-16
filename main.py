@@ -6,8 +6,12 @@ import json
 import os
 from typing import Any, AsyncGenerator
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Load environment configuration from .env file
+load_dotenv()
 
 import database.db as db_module
 from database.db import close_db_pool, init_db_pool, is_pool_ready

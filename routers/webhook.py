@@ -14,6 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, 
 
 import database.db as db_module
 from database.db import (
+    add_commit_log,
     get_project_by_repo_url,
     get_unresolved_suggestions,
     is_delivery_processed,
@@ -69,6 +70,7 @@ async def process_push_webhook_bg(payload: dict[str, Any], delivery_id: str) -> 
         logger.error("DB Pool not ready in background webhook processing.")
         return
 
+    project = None
     async with db_module.DB_POOL.acquire() as conn:
         # Record delivery idempotency in database
         await record_delivery_processed(conn, delivery_id)
@@ -94,30 +96,53 @@ async def process_push_webhook_bg(payload: dict[str, Any], delivery_id: str) -> 
             logger.info(f"No registered project found for repository URL: {repo_url}")
             return
 
-        # Extract commits and modified file paths
-        commits = payload.get("commits", [])
-        commit_messages = [c.get("message", "") for c in commits if c.get("message")]
-        modified_files: list[str] = []
-        for c in commits:
-            modified_files.extend(c.get("added", []))
-            modified_files.extend(c.get("modified", []))
-            modified_files.extend(c.get("removed", []))
-        modified_files = list(set(modified_files))
+    # Extract commits and modified file paths
+    commits = payload.get("commits", [])
+    commit_messages = [c.get("message", "") for c in commits if c.get("message")]
+    modified_files: list[str] = []
+    for c in commits:
+        modified_files.extend(c.get("added", []))
+        modified_files.extend(c.get("modified", []))
+        modified_files.extend(c.get("removed", []))
+    modified_files = list(set(modified_files))
 
-        # Classify update: Major vs. Minor
-        classification = await classify_push_update(commit_messages, modified_files)
-        logger.info(f"Push classification for project {project['id']}: {classification}")
+    # Classify update: Major vs. Minor
+    classification = await classify_push_update(commit_messages, modified_files)
+    logger.info(f"Push classification for project {project['id']}: {classification}")
 
-        if classification == "Minor":
-            logger.info(f"Minor push for project {project['id']} ignored.")
-            return
-
-        # Major update flow: full scan & evaluation
-        logger.info(f"Triggering full scan & re-evaluation for project {project['id']}.")
+    # Persist commit logs to commit_logs table
+    if commits and db_module.is_pool_ready() and db_module.DB_POOL is not None:
         try:
-            repo_context = await scan_github_repository(project["repo_url"])
-            eval_res = await evaluate_repository(repo_context)
+            async with db_module.DB_POOL.acquire() as log_conn:
+                for c in commits:
+                    msg = c.get("message", "")
+                    if msg:
+                        author = c.get("author", {}).get("name") or c.get("author", {}).get("username") or "Developer"
+                        await add_commit_log(
+                            log_conn,
+                            {
+                                "project_id": project["id"],
+                                "commit_hash": (c.get("id") or c.get("sha") or "")[:12],
+                                "commit_message": msg,
+                                "author_name": author,
+                                "classification": classification,
+                            },
+                        )
+        except Exception as log_exc:
+            logger.warning(f"Failed to record commit log for project {project['id']}: {log_exc}")
 
+    if classification == "Minor":
+        logger.info(f"Minor push for project {project['id']} ignored.")
+        return
+
+    # Major update flow: full scan & evaluation (network I/O without holding DB connection)
+    logger.info(f"Triggering full scan & re-evaluation for project {project['id']}.")
+    try:
+        repo_context = await scan_github_repository(project["repo_url"])
+        eval_res = await evaluate_repository(repo_context)
+
+        # Re-acquire DB connection for updates and follow-ups
+        async with db_module.DB_POOL.acquire() as conn:
             await update_project_ai_scores(
                 conn,
                 project_id=project["id"],
@@ -148,10 +173,23 @@ async def process_push_webhook_bg(payload: dict[str, Any], delivery_id: str) -> 
                         pool=conn,
                     )
 
-        except Exception as exc:
-            logger.error(f"Error processing major push evaluation for project {project['id']}: {exc}")
+    except Exception as exc:
+        logger.error(f"Error processing major push evaluation for project {project['id']}: {exc}")
 
 
+
+@router.post(
+    "",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="GitHub push webhook handler (root alias)",
+    description="Validates HMAC signature, checks delivery idempotency, and enqueues push event processing.",
+)
+@router.post(
+    "/",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="GitHub push webhook handler (slash alias)",
+    description="Validates HMAC signature, checks delivery idempotency, and enqueues push event processing.",
+)
 @router.post(
     "/github",
     status_code=status.HTTP_202_ACCEPTED,

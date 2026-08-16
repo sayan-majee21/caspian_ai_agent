@@ -76,18 +76,23 @@ async def process_notifications(
                 message = await generate_outreach_message(rec, project)
                 dispatch_res = await asyncio.to_thread(dispatch_message, rec, message, client=client)
 
-                channel = rec.get("preferred_channel", "email") or "email"
-                await db.create_notification_log(
-                    db_conn,
-                    recruiter_id=rec_id,
-                    project_id=project_id,
-                    channel=channel,
-                    is_followup=False,
-                )
-                processed_count += 1
-                logger.info(
-                    f"Successfully processed notification for recruiter_id={rec_id}, project_id={project_id}"
-                )
+                if dispatch_res.get("status") != "failed":
+                    channel = rec.get("preferred_channel", "email") or "email"
+                    await db.create_notification_log(
+                        db_conn,
+                        recruiter_id=rec_id,
+                        project_id=project_id,
+                        channel=channel,
+                        is_followup=False,
+                    )
+                    processed_count += 1
+                    logger.info(
+                        f"Successfully processed notification for recruiter_id={rec_id}, project_id={project_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"Notification dispatch returned failed for recruiter_id={rec_id}, project_id={project_id}: {dispatch_res.get('error')}"
+                    )
             except Exception as rec_exc:
                 logger.error(
                     f"Failed processing notification for recruiter_id={rec_id}, project_id={project_id}: {rec_exc}",
@@ -161,6 +166,98 @@ async def send_followup_notification(
         "status": "completed",
         "is_followup": True,
         "recruiter_id": recruiter_id,
+        "project_id": project_id,
+        "dispatch_result": dispatch_res,
+    }
+
+
+async def notify_student_of_suggestion(
+    project_id: int,
+    recruiter_id: int,
+    suggestion_text: str,
+    pool: asyncpg.Pool | asyncpg.Connection | None = None,
+    client: Any | None = None,
+    project: dict[str, Any] | None = None,
+    recruiter: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute student notification when a recruiter submits constructive feedback or a suggestion.
+
+    Args:
+        project_id (int): Project ID that received the suggestion.
+        recruiter_id (int): Recruiter ID who left the suggestion.
+        suggestion_text (str): Suggestion feedback content.
+        pool (asyncpg.Pool | asyncpg.Connection | None): Optional database pool or connection.
+        client (Any | None): Optional Caspian CommClient override.
+        project (dict[str, Any] | None): Optional pre-fetched project record.
+        recruiter (dict[str, Any] | None): Optional pre-fetched recruiter record.
+
+    Returns:
+        dict[str, Any]: Notification dispatch status summary.
+    """
+    db_conn = pool or db.DB_POOL
+
+    proj = project
+    rec = recruiter
+    student = None
+
+    try:
+        if db_conn is not None:
+            if proj is None:
+                proj = await db.get_project_by_id(db_conn, project_id)
+            if rec is None:
+                rec = await db.get_recruiter_by_id(db_conn, recruiter_id)
+            if proj:
+                student_id = proj.get("student_id")
+                if student_id:
+                    student = await db.get_student_by_id(db_conn, student_id)
+                elif proj.get("student_email"):
+                    student = {
+                        "id": proj.get("student_id", 0),
+                        "name": proj.get("student_name", "Developer"),
+                        "email": proj.get("student_email"),
+                    }
+    except Exception as fetch_err:
+        logger.warning(f"Error fetching metadata for student notification: {fetch_err}")
+
+    if not proj:
+        logger.warning(f"Project id={project_id} not found for student notification.")
+        return {"status": "error", "message": f"Project {project_id} not found"}
+
+    if not student or not student.get("email"):
+        logger.warning(f"Student not found or missing email for project_id={project_id}")
+        return {"status": "error", "message": "Student not found or missing email"}
+
+    recruiter_name = rec.get("name", "A Tech Recruiter") if rec else "A Tech Recruiter"
+    repo_url = proj.get("repo_url") or ""
+    repo_name = repo_url.rstrip("/").split("/")[-1] if repo_url else f"Project #{project_id}"
+
+    message = (
+        f"Hi {student.get('name', 'Developer')},\n\n"
+        f"Great news! {recruiter_name} from our verified recruiter network just reviewed your project '{repo_name}' and left the following suggestion for improvement:\n\n"
+        f"💬 \"{suggestion_text}\"\n\n"
+        f"💡 Tip: When you address this feedback and push updates to your GitHub repository, TalentCaspian will automatically analyze your changes, update your score, and notify the recruiter!\n\n"
+        f"Check your Personal Analytics dashboard to view detailed feedback."
+    )
+
+    student_recipient = {
+        "id": student["id"],
+        "email": student["email"],
+        "preferred_channel": "email",
+    }
+
+    try:
+        dispatch_res = await asyncio.to_thread(dispatch_message, student_recipient, message, client=client)
+    except Exception as send_err:
+        logger.warning(f"Failed to dispatch student notification email: {send_err}")
+        dispatch_res = {"status": "failed", "error": str(send_err)}
+
+    logger.info(
+        f"Dispatched recruiter suggestion notification to student {student['email']} for project #{project_id}"
+    )
+    return {
+        "status": "completed",
+        "student_id": student["id"],
+        "student_email": student["email"],
         "project_id": project_id,
         "dispatch_result": dispatch_res,
     }
