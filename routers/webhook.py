@@ -14,6 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, 
 
 import database.db as db_module
 from database.db import (
+    add_commit_log,
     get_project_by_repo_url,
     get_unresolved_suggestions,
     is_delivery_processed,
@@ -108,6 +109,27 @@ async def process_push_webhook_bg(payload: dict[str, Any], delivery_id: str) -> 
     # Classify update: Major vs. Minor
     classification = await classify_push_update(commit_messages, modified_files)
     logger.info(f"Push classification for project {project['id']}: {classification}")
+
+    # Persist commit logs to commit_logs table
+    if commits and db_module.is_pool_ready() and db_module.DB_POOL is not None:
+        try:
+            async with db_module.DB_POOL.acquire() as log_conn:
+                for c in commits:
+                    msg = c.get("message", "")
+                    if msg:
+                        author = c.get("author", {}).get("name") or c.get("author", {}).get("username") or "Developer"
+                        await add_commit_log(
+                            log_conn,
+                            {
+                                "project_id": project["id"],
+                                "commit_hash": (c.get("id") or c.get("sha") or "")[:12],
+                                "commit_message": msg,
+                                "author_name": author,
+                                "classification": classification,
+                            },
+                        )
+        except Exception as log_exc:
+            logger.warning(f"Failed to record commit log for project {project['id']}: {log_exc}")
 
     if classification == "Minor":
         logger.info(f"Minor push for project {project['id']} ignored.")
