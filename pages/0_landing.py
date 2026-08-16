@@ -95,7 +95,9 @@ total_count = feed_data.get("total", len(items))
 
 st.caption(f"Showing **{len(items)}** of **{total_count}** evaluated projects matching your criteria.")
 
-if not items:
+if feed_data.get("connection_error"):
+    st.warning("⚠️ **FastAPI Backend is currently offline or connecting.** Ensure `python -m uvicorn main:app --reload --port 5001` is running in your backend terminal.")
+elif not items:
     st.info("No projects found matching the filter criteria. Try resetting filters or lowering the score threshold.")
 else:
     # Render candidate project cards

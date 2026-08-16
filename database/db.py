@@ -156,9 +156,12 @@ async def init_db_pool() -> None:
     if DB_POOL is not None:
         return
 
+    from dotenv import load_dotenv
+    load_dotenv()
+
     database_url = os.getenv(
         "DATABASE_URL",
-        "postgresql://postgres:password@localhost:5432/talentcaspian",
+        "postgresql://postgres:postgres@localhost:5432/talentcaspian",
     )
     min_size = int(os.getenv("DB_MIN_SIZE", "5"))
     max_size = int(os.getenv("DB_MAX_SIZE", "20"))

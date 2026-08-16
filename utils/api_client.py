@@ -7,12 +7,16 @@ import logging
 import os
 from typing import Any
 
+from dotenv import load_dotenv
 import httpx
 import streamlit as st
 
+# Load environment configuration
+load_dotenv()
+
 logger = logging.getLogger("talentcaspian.frontend.api")
 
-DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
+DEFAULT_BACKEND_URL = "http://127.0.0.1:5001"
 DEFAULT_ADMIN_KEY = "dev_admin_key_12345"
 
 
@@ -43,7 +47,7 @@ def _build_client() -> httpx.Client:
     """
     return httpx.Client(
         base_url=get_backend_url(),
-        timeout=httpx.Timeout(20.0, connect=10.0),
+        timeout=httpx.Timeout(20.0, connect=5.0),
         headers={"Accept": "application/json"},
     )
 
@@ -202,11 +206,15 @@ def fetch_feed(
     if min_score is not None and min_score > 0:
         params["min_score"] = float(min_score)
 
-    with _build_client() as client:
-        response = client.get("/api/dashboard", params=params)
-        if response.status_code == 200:
-            return response.json()
-        return {"items": [], "total": 0, "page": page, "limit": limit}
+    try:
+        with _build_client() as client:
+            response = client.get("/api/dashboard", params=params)
+            if response.status_code == 200:
+                return response.json()
+            return {"items": [], "total": 0, "page": page, "limit": limit}
+    except httpx.RequestError as exc:
+        logger.warning("Could not connect to FastAPI backend at %s: %s", get_backend_url(), exc)
+        return {"items": [], "total": 0, "page": page, "limit": limit, "connection_error": True}
 
 
 # ==========================================

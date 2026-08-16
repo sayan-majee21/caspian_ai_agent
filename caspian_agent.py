@@ -278,7 +278,7 @@ def connect_channels(comm_client: CommClient) -> None:
             comm_client.connect_telegram(bot_token=telegram_token)
             logger.info("✓ Telegram channel connected successfully.")
         except Exception as exc:
-            logger.error("✗ Failed to connect Telegram channel: %s", exc, exc_info=True)
+            logger.warning("⚠ Could not connect Telegram channel to Caspian network: %s", exc)
     else:
         logger.warning("⚠ TELEGRAM_BOT_TOKEN missing in environment configuration.")
 
@@ -288,7 +288,7 @@ def connect_channels(comm_client: CommClient) -> None:
             comm_client.connect_email(username=email_user)
             logger.info("✓ Email channel connected successfully for user '%s'.", email_user)
         except Exception as exc:
-            logger.error("✗ Failed to connect Email channel: %s", exc, exc_info=True)
+            logger.warning("⚠ Could not connect Email channel to Caspian network: %s", exc)
     else:
         logger.warning("⚠ CASPIAN_EMAIL_USER missing in environment configuration.")
 
@@ -300,14 +300,23 @@ def run_listener(comm_client: CommClient) -> None:
         comm_client (CommClient): The instantiated Caspian client.
     """
     logger.info("Listening for incoming messages across all connected channels...")
-    retry_delay = 2
+    retry_delay = 5
+    max_retries = 3
+    retry_count = 0
     while True:
         try:
             comm_client.listen()
             break
         except Exception as exc:
-            logger.error(
-                "Caspian listener loop encountered error: %s. Reconnecting in %ss...",
+            retry_count += 1
+            if retry_count >= max_retries:
+                logger.warning(
+                    "⚠ Caspian network server unreachable (%s). Standby listener active.",
+                    exc,
+                )
+                break
+            logger.warning(
+                "Caspian listener loop encountered network issue: %s. Retrying in %ss...",
                 exc,
                 retry_delay,
             )
