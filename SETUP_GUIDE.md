@@ -84,11 +84,11 @@ ENVIRONMENT=development
 PORT=5001
 
 # -- Database Configuration --
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/talentcaspian
+DATABASE_URL=postgresql://username:password@localhost:5432/talentcaspian
 
 # -- Authentication & Security --
-ADMIN_API_KEY=dev_admin_key_12345
-GITHUB_WEBHOOK_SECRET=dev_webhook_secret_12345
+ADMIN_API_KEY=your_admin_api_key
+GITHUB_WEBHOOK_SECRET=your_github_webhook_secret
 GITHUB_TOKEN=your_github_personal_access_token
 
 # -- AI Engine (Google GenAI SDK v2.18+) --
@@ -98,7 +98,7 @@ GEMINI_API_KEY=your_google_gemini_api_key
 CASPIAN_API_KEY=your_caspian_network_api_key
 CASPIAN_BASE_URL=https://api.trycaspianai.com
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-CASPIAN_EMAIL_USER=your_email_address@example.com
+CASPIAN_EMAIL_USER=your_email@example.com
 
 # -- CORS & Frontend --
 FRONTEND_URL=http://localhost:5173

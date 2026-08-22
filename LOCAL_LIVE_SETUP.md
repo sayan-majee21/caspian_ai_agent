@@ -13,19 +13,19 @@ This guide provides exact **Windows (PowerShell & CMD)** step-by-step instructio
 ### 1.1 Google Gemini API Key
 1. Open your browser and go to [Google AI Studio](https://aistudio.google.com/).
 2. Click **Create API Key**.
-3. Copy your key (starts with `AIzaSy...`).
+3. Copy your API key.
 
 ### 1.2 GitHub Personal Access Token (PAT)
 1. Go to [GitHub Developer Settings ➔ Personal Access Tokens (Classic)](https://github.com/settings/tokens).
 2. Click **Generate new token (classic)**.
 3. Name it `TalentCaspian-Local-Windows`.
 4. Select scope: `repo` (for private repositories) or leave default for public repositories.
-5. Copy your token (starts with `ghp_...`).
+5. Copy your token.
 
 ### 1.3 Telegram Bot Token & Username
 1. Open the Telegram app on your phone or PC and search for `@BotFather`.
 2. Send `/newbot`, enter a display name (e.g. `MyTalentCaspianBot`) and username (e.g. `my_talentcaspian_bot`).
-3. Copy the HTTP API Bot Token provided by BotFather (e.g., `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`).
+3. Copy the HTTP API Bot Token provided by BotFather.
 4. Search for your newly created bot on Telegram, click **Start**, and send it a test message (e.g., `"Hello"`).
 
 ### 1.4 Caspian Network Key
@@ -55,20 +55,20 @@ PORT=5001
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/talentcaspian
 
 # Security Keys
-ADMIN_API_KEY=my_secret_admin_key_2026
-GITHUB_WEBHOOK_SECRET=my_github_webhook_secret_2026
+ADMIN_API_KEY=your_admin_api_key
+GITHUB_WEBHOOK_SECRET=your_github_webhook_secret
 
 # Real GitHub Personal Access Token
-GITHUB_TOKEN=ghp_YOUR_ACTUAL_GITHUB_TOKEN_HERE
+GITHUB_TOKEN=your_github_personal_access_token
 
 # Real Google Gemini API Key
-GEMINI_API_KEY=AIzaSy_YOUR_ACTUAL_GEMINI_KEY_HERE
+GEMINI_API_KEY=your_google_gemini_api_key
 
 # Real Caspian & Telegram Credentials
-CASPIAN_API_KEY=your_actual_caspian_key_here
+CASPIAN_API_KEY=your_caspian_api_key
 CASPIAN_BASE_URL=https://api.trycaspianai.com
-TELEGRAM_BOT_TOKEN=123456789:YOUR_ACTUAL_TELEGRAM_BOT_TOKEN_HERE
-CASPIAN_EMAIL_USER=your_email@gmail.com
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+CASPIAN_EMAIL_USER=your_email@example.com
 
 # Frontend URL
 FRONTEND_URL=http://localhost:5173
@@ -159,7 +159,7 @@ Trigger the recruiter outreach evaluation via Admin API:
 ```powershell
 Invoke-RestMethod -Uri "http://localhost:5001/api/admin/notify" `
   -Method Post `
-  -Headers @{ "X-Admin-API-Key" = "my_secret_admin_key_2026" }
+  -Headers @{ "X-Admin-API-Key" = "your_admin_api_key" }
 ```
 
 > 📱 **Check your Telegram app on your phone!**  
@@ -190,7 +190,7 @@ Open the message on Telegram on your phone and reply directly:
 4. Go to your GitHub repo ➔ **Settings ➔ Webhooks ➔ Add webhook**:
    - **Payload URL**: `https://abc1234.ngrok-free.app/api/webhook/github`
    - **Content type**: `application/json`
-   - **Secret**: `my_github_webhook_secret_2026`
+   - **Secret**: `your_github_webhook_secret`
    - **Events**: `Just the push event`
 5. Push a commit to your repo with commit message: `"feat: add Dockerfile and docker-compose deployment setup"`.
 
