@@ -299,7 +299,7 @@ cp .env.example .env
 Edit `.env`:
 ```env
 # Database
-DATABASE_URL=postgresql://postgres:password@localhost:5432/talentcaspian
+DATABASE_URL=postgresql://username:password@localhost:5432/talentcaspian
 
 # AI Reasoning
 GEMINI_API_KEY=your_google_gemini_api_key
@@ -307,11 +307,13 @@ GEMINI_API_KEY=your_google_gemini_api_key
 # Caspian Communication Platform
 CASPIAN_API_KEY=your_caspian_api_key
 CASPIAN_BASE_URL=https://api.trycaspianai.com
-TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+CASPIAN_EMAIL_USER=your_email@example.com
 
-# Security & Webhooks
-GITHUB_WEBHOOK_SECRET=your_github_webhook_secret_key
-ADMIN_API_KEY=dev_admin_secret_key
+# GitHub & Security
+GITHUB_TOKEN=your_github_personal_access_token
+GITHUB_WEBHOOK_SECRET=your_github_webhook_secret
+ADMIN_API_KEY=your_admin_api_key
 ```
 
 ### 4️⃣ Initialize Database Schema & Seed Data
